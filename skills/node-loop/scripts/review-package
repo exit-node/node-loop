@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# review-package: write the reviewer's input for one plan node round.
+#
+# Usage: review-package <run-dir> <node-id> <round> <base> <head>
+# Writes <run-dir>/reviews/<node-id>-r<round>.md (header, commit log, diff stat, diff -U10)
+# and <run-dir>/reviews/<node-id>-r<round>.patch (plain `git diff base head` for the next implementer).
+# Git runs in REPO from <run-dir>/meta.env when present, else in the current directory.
+# The diff fence is one backtick longer than the longest backtick run in the diff,
+# so diffs of markdown files cannot close the block early.
+# Prints the .md path.
+set -euo pipefail
+
+usage() {
+  printf 'review-package: %s\n' "$1" >&2
+  printf '%s\n' "usage: review-package <run-dir> <node-id> <round> <base> <head>" >&2
+  exit 2
+}
+
+[ "$#" -eq 5 ] || usage "expected 5 arguments"
+run_dir=$1
+node_id=$2
+round=$3
+base=$4
+head=$5
+
+NODE_RE='^[0-9]{2}-[a-z0-9-]+$'
+[ -d "$run_dir" ] || usage "run dir not found: $run_dir"
+[[ "$node_id" =~ $NODE_RE ]] || usage "invalid plan node id: $node_id"
+case "$round" in
+  '' | *[!0-9]* | 0) usage "round must be a positive integer: $round" ;;
+esac
+
+run_dir=$(cd "$run_dir" && pwd)
+repo=.
+if [ -f "$run_dir/meta.env" ]; then
+  REPO=""
+  # shellcheck disable=SC1091
+  . "$run_dir/meta.env"
+  [ -z "$REPO" ] || repo=$REPO
+fi
+
+g() {
+  git -C "$repo" -c core.quotePath=false "$@"
+}
+
+g rev-parse -q --verify "$base^{commit}" >/dev/null || usage "unknown base revision: $base"
+g rev-parse -q --verify "$head^{commit}" >/dev/null || usage "unknown head revision: $head"
+base_sha=$(g rev-parse --short "$base^{commit}")
+head_sha=$(g rev-parse --short "$head^{commit}")
+
+mkdir -p "$run_dir/reviews"
+md="$run_dir/reviews/$node_id-r$round.md"
+patch="$run_dir/reviews/$node_id-r$round.patch"
+
+g diff --no-color --no-ext-diff "$base" "$head" >"$patch"
+
+diff_text=$(g diff --no-color --no-ext-diff -U10 "$base" "$head")
+
+# Longest run of backticks in the diff, plus one, minimum three.
+longest=$(printf '%s\n' "$diff_text" | grep -o '``*' | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }' || true)
+width=$((longest + 1))
+[ "$width" -ge 3 ] || width=3
+fence=$(printf '%*s' "$width" '' | tr ' ' '`')
+
+{
+  printf '# Review package: %s round %s\n\n' "$node_id" "$round"
+  printf -- '- Plan node: %s\n' "$node_id"
+  printf -- '- Round: %s\n' "$round"
+  printf -- '- Range: %s..%s (%s..%s)\n\n' "$base" "$head" "$base_sha" "$head_sha"
+  printf '## Commits\n\n%s\n' "$fence"
+  g log --no-color --oneline "$base..$head"
+  printf '%s\n\n## Diff stat\n\n%s\n' "$fence" "$fence"
+  g diff --no-color --no-ext-diff --stat "$base" "$head"
+  printf '%s\n\n## Diff\n\n%sdiff\n' "$fence" "$fence"
+  printf '%s\n' "$diff_text"
+  printf '%s\n' "$fence"
+} >"$md"
+
+printf '%s\n' "$md"

@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# ledger: append one validated event line to <run-dir>/ledger.md.
+#
+# Usage: ledger <run-dir> <subject> <event> [k=v...] [-- text]
+# Line format: <ISO-8601 UTC> <subject> <event>[ k=v]...[ -- text]
+# Grammar (subjects, events, keys) lives in docs/CONTRACT.md "Ledger grammar".
+# Every key listed for an event is required, so the forge view can rely on it.
+# Free text is display-only; newlines in it are flattened so one event stays one line.
+# The line is written with a single printf >> so concurrent writers do not interleave.
+# Exit 2 with a usage message on any invalid input.
+set -euo pipefail
+
+usage() {
+  {
+    [ -n "${1:-}" ] && printf 'ledger: %s\n' "$1"
+    printf '%s\n' "usage: ledger <run-dir> <subject> <event> [k=v...] [-- text]"
+    printf '%s\n' "subjects: run scout plan council seat-1 seat-2 seat-3 NN-slug"
+  } >&2
+  exit 2
+}
+
+# Plan node ids: two digits, dash, lowercase slug.
+NODE_RE='^[0-9]{2}-[a-z0-9-]+$'
+
+# Prints the required keys for <subject-kind> <event>, or returns 1 if the event is unknown.
+keys_for() {
+  case "$1:$2" in
+    run:start) echo "branch base" ;;
+    run:done | run:blocked) echo "" ;;
+    scout:start) echo "n" ;;
+    scout:done) echo "" ;;
+    plan:start | plan:approved | plan:revised) echo "" ;;
+    plan:done) echo "nodes waves" ;;
+    node:queued) echo "wave deps" ;;
+    node:implement) echo "round agent" ;;
+    node:review | node:pass | node:blocked) echo "round" ;;
+    node:fence) echo "round paths" ;;
+    node:fail) echo "round blockers majors" ;;
+    node:merged) echo "commits" ;;
+    node:ruled) echo "round findings" ;;
+    council:start | council:verify) echo "" ;;
+    council:done) echo "verdict blockers" ;;
+    seat:start) echo "" ;;
+    seat:done) echo "findings" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Keys whose values are non-negative integer counts or indices.
+INT_KEYS=" n nodes waves wave round blockers majors findings "
+
+[ "$#" -ge 3 ] || usage "expected at least 3 arguments"
+
+run_dir=$1
+subject=$2
+event=$3
+shift 3
+
+[ -d "$run_dir" ] || usage "run dir not found: $run_dir"
+
+case "$subject" in
+  run | scout | plan | council) kind=$subject ;;
+  seat-1 | seat-2 | seat-3) kind=seat ;;
+  *)
+    if [[ "$subject" =~ $NODE_RE ]]; then
+      kind=node
+    else
+      usage "invalid subject: $subject"
+    fi
+    ;;
+esac
+
+required=$(keys_for "$kind" "$event") || usage "invalid event for $subject: $event"
+
+pairs=""
+seen=" "
+text=""
+while [ "$#" -gt 0 ]; do
+  arg=$1
+  shift
+  if [ "$arg" = "--" ]; then
+    text="$*"
+    break
+  fi
+  case "$arg" in
+    *[[:space:]]*) usage "key=value must not contain whitespace: $arg" ;;
+    *=*) ;;
+    *) usage "expected key=value or --, got: $arg" ;;
+  esac
+  key=${arg%%=*}
+  value=${arg#*=}
+  [ -n "$value" ] || usage "empty value for key: $key"
+  case " $required " in
+    *" $key "*) ;;
+    *) usage "key '$key' not allowed for $subject $event (allowed: ${required:-none})" ;;
+  esac
+  case "$seen" in
+    *" $key "*) usage "duplicate key: $key" ;;
+  esac
+  case "$INT_KEYS" in
+    *" $key "*)
+      case "$value" in
+        *[!0-9]*) usage "$key must be a non-negative integer: $value" ;;
+      esac
+      ;;
+  esac
+  if [ "$key" = "verdict" ]; then
+    case "$value" in
+      clean | fix) ;;
+      *) usage "verdict must be clean or fix: $value" ;;
+    esac
+  fi
+  seen="$seen$key "
+  pairs="$pairs $key=$value"
+done
+
+for key in $required; do
+  case "$seen" in
+    *" $key "*) ;;
+    *) usage "missing key '$key' for $subject $event (required: $required)" ;;
+  esac
+done
+
+# Flatten line breaks and tabs so the event stays on one line.
+text=$(printf '%s' "$text" | tr '\r\n\t' '   ')
+# Trim surrounding whitespace.
+text=$(printf '%s' "$text" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+line="$(date -u +%Y-%m-%dT%H:%M:%SZ) $subject $event$pairs"
+if [ -n "$text" ]; then
+  line="$line -- $text"
+fi
+
+printf '%s\n' "$line" >>"$run_dir/ledger.md"

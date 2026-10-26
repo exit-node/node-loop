@@ -1,0 +1,606 @@
+<!doctype html>
+<!--
+  Forge view for node-loop: renders the State JSON pushed over /events (docs/CONTRACT.md "Forge view").
+  Self-contained: inline CSS, JS and SVG, no network beyond the local server.
+  Layout left to right: scout, plan, one lane per plan node grouped by wave, three council crucibles, ship.
+  Animation runs on requestAnimationFrame; each pipe eases toward targets derived from its status,
+  so state changes never jump. prefers-reduced-motion snaps to targets and keeps glows static.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>forge - node-loop</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --fg: #d9d9d9;
+    --dim: #6b6b6b;
+    --hot: #ff6a00;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--fg); font-family: var(--mono); }
+  header {
+    display: flex; align-items: baseline; gap: 22px;
+    height: 46px; padding: 14px 24px 0; border-bottom: 1px solid #141414;
+    font-size: 13px; white-space: nowrap;
+  }
+  header .brand { color: var(--hot); font-weight: 700; letter-spacing: .12em; }
+  header .k { color: var(--dim); margin-right: 6px; }
+  header .goal { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #f2f2f2; }
+  .st-running { color: #ff9a3c; }
+  .st-done { color: #9a9a9a; }
+  .st-blocked { color: #ff3b2a; }
+  #conn { color: var(--dim); }
+  #conn::before {
+    content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px;
+    border-radius: 50%; background: #3a3a3a; vertical-align: middle;
+  }
+  #conn.live::before { background: var(--hot); }
+  main { position: relative; height: calc(100% - 46px); padding: 10px 16px 16px; }
+  svg { display: block; width: 100%; height: 100%; }
+  svg text { font-family: var(--mono); }
+  .trough { stroke: #1f1f1f; stroke-width: 14; stroke-linecap: round; fill: none; }
+  .trough-in { stroke: #050505; stroke-width: 10; stroke-linecap: round; fill: none; }
+  .ltrough { stroke: #1a1a1a; stroke-width: 10; stroke-linecap: round; fill: none; }
+  .ltrough-in { stroke: #050505; stroke-width: 6; stroke-linecap: round; fill: none; }
+  .id { fill: var(--fg); font-size: 12px; }
+  .sub { fill: var(--dim); font-size: 11px; }
+  .col { fill: #4d4d4d; font-size: 10px; letter-spacing: .16em; }
+  .badge-t { font-size: 9px; font-weight: 700; }
+  #empty {
+    position: absolute; inset: 0; display: none;
+    flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    color: var(--dim); font-size: 13px;
+  }
+  #empty .title { color: #bdbdbd; font-size: 15px; }
+  #empty code { color: var(--hot); font-family: var(--mono); }
+  body.idle #empty { display: flex; }
+  body.idle svg { display: none; }
+</style>
+</head>
+<body class="idle">
+<header>
+  <span class="brand">FORGE</span>
+  <span><span class="k">run</span><span id="run-id">-</span></span>
+  <span><span class="k">repo</span><span id="repo">-</span></span>
+  <span class="goal" id="goal"></span>
+  <span><span class="k">elapsed</span><span id="elapsed">-</span></span>
+  <span id="run-status"></span>
+  <span id="conn">offline</span>
+</header>
+<main>
+  <svg id="forge" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="node-loop run progress"></svg>
+  <div id="empty">
+    <div class="title" id="empty-title">connecting</div>
+    <div>start one with <code>exitnode &lt;goal&gt;</code></div>
+  </div>
+</main>
+<script>
+"use strict";
+
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("forge");
+const reduceQuery = matchMedia("(prefers-reduced-motion: reduce)");
+let reduce = reduceQuery.matches;
+reduceQuery.addEventListener("change", (e) => { reduce = e.matches; });
+
+// Metal palette: cooled grey, molten orange, yellow core.
+const GREY = [92, 92, 92];
+const ORANGE = [255, 106, 0];
+const YELLOW = [255, 214, 64];
+const AMBER = "#ffb000";
+const RED = "#ff2a1a";
+// Heat drops from molten to grey in 2 s; heating up is faster so a re-pour reads immediately.
+const COOL_PER_S = 0.5;
+const HEAT_PER_S = 3;
+// Pour front: starts at 8% of the channel and creeps toward 88% with this time constant.
+const POUR_TAU_MS = 150000;
+const LANE_H = 78;
+const TOP = 70;
+const CRUCIBLE_GAP = 100;
+
+const SUB_COLOR = {
+  queued: "#4f4f4f", pouring: "#ff9a3c", review: "#fff1d6", kickback: "#ff3b2a",
+  passed: "#8a8a8a", merged: "#8a8a8a", ruled: AMBER, blocked: "#ff3b2a",
+};
+
+let state = null;
+let layoutKey = "";
+let layoutRun = "";
+// Animated values survive layout rebuilds, keyed by pipe id.
+const memory = new Map();
+let pipes = [];
+let crucibles = [];
+let ship = null;
+let councilLabel = null;
+let L = null;
+
+function make(tag, attrs, parent) {
+  const el = document.createElementNS(NS, tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+
+function mix(a, b, t) {
+  return `rgb(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)})`;
+}
+
+function mem(id) {
+  let m = memory.get(id);
+  if (!m) {
+    m = { status: null, since: 0, round: 0, f: 0, heat: 1, glowA: 0, glowMode: "hot", dash: 0, kickUntil: 0, fresh: true };
+    memory.set(id, m);
+  }
+  return m;
+}
+
+// Exponential ease toward a target at `rate` per second.
+function ease(cur, target, rate, dt) {
+  return cur + (target - cur) * (1 - Math.exp(-rate * dt));
+}
+
+function heatStep(cur, target, dt) {
+  return target < cur ? Math.max(target, cur - COOL_PER_S * dt) : Math.min(target, cur + HEAT_PER_S * dt);
+}
+
+// Approximate cubic length by sampling; enough for dash-based partial fills.
+function cubicLength(p) {
+  let len = 0, px = p[0], py = p[1];
+  for (let i = 1; i <= 32; i++) {
+    const t = i / 32, u = 1 - t;
+    const x = u * u * u * p[0] + 3 * u * u * t * p[2] + 3 * u * t * t * p[4] + t * t * t * p[6];
+    const y = u * u * u * p[1] + 3 * u * u * t * p[3] + 3 * u * t * t * p[5] + t * t * t * p[7];
+    len += Math.hypot(x - px, y - py);
+    px = x; py = y;
+  }
+  return len;
+}
+
+function gradient(defs, id, stops) {
+  const g = make("radialGradient", { id }, defs);
+  for (const [offset, color, opacity] of stops) {
+    make("stop", { offset, "stop-color": color, "stop-opacity": opacity }, g);
+  }
+}
+
+function addChannel(id, x1, x2, y, name) {
+  make("line", { x1, y1: y, x2, y2: y, class: "trough" }, L.trough);
+  make("line", { x1, y1: y, x2, y2: y, class: "trough-in" }, L.trough);
+  const line = (w, extra) => make("line", { x1, y1: y, x2: x1, y2: y, "stroke-width": w, "stroke-linecap": "round", opacity: 0, ...extra }, L.metal);
+  const p = {
+    id, kind: "channel", x1, x2, y, len: x2 - x1, m: mem(id),
+    metal: line(8, {}),
+    core: line(3, {}),
+    flow: line(2, { stroke: "#fff7d0", "stroke-dasharray": "3 11", "stroke-linecap": "butt" }),
+    glow: make("circle", { cx: x1, cy: y, r: 0, fill: "url(#g-hot)", opacity: 0 }, L.glow),
+    cap: make("rect", { x: x1 - 3, y: y - 12, width: 6, height: 24, rx: 1, fill: RED, opacity: 0 }, L.top),
+    badge: make("g", { opacity: 0 }, L.top),
+  };
+  p.badgeRing = make("circle", { cx: x2 + 6, cy: y - 20, r: 9, fill: "#000", "stroke-width": 1.5 }, p.badge);
+  p.badgeText = make("text", { x: x2 + 6, y: y - 17, "text-anchor": "middle", class: "badge-t" }, p.badge);
+  make("text", { x: x1 - 4, y: y - 16, class: "id" }, L.label).textContent = name;
+  p.sub = make("text", { x: x1 - 4, y: y + 26, class: "sub" }, L.label);
+  pipes.push(p);
+  return p;
+}
+
+// A join between two channel ends; `filled(state)` says when metal has passed through it.
+function addLink(id, ax, ay, bx, by, filled) {
+  const dx = Math.max(24, (bx - ax) / 2);
+  const pts = [ax, ay, ax + dx, ay, bx - dx, by, bx, by];
+  const d = `M${ax} ${ay} C${ax + dx} ${ay} ${bx - dx} ${by} ${bx} ${by}`;
+  make("path", { d, class: "ltrough" }, L.trough);
+  make("path", { d, class: "ltrough-in" }, L.trough);
+  const path = (w) => make("path", { d, fill: "none", "stroke-width": w, "stroke-linecap": "butt", opacity: 0 }, L.metal);
+  const p = { id, kind: "link", len: cubicLength(pts), m: mem(id), metal: path(6), core: path(2), filled };
+  pipes.push(p);
+  return p;
+}
+
+function addCrucible(i, cx, cy) {
+  const m = mem(`seat-${i + 1}`);
+  const top = cy - 24, bottom = cy + 28;
+  const d = `M${cx - 28} ${top} L${cx - 21} ${cy + 22} Q${cx - 20} ${bottom} ${cx - 14} ${bottom} L${cx + 14} ${bottom} Q${cx + 20} ${bottom} ${cx + 21} ${cy + 22} L${cx + 28} ${top}`;
+  const clip = make("clipPath", { id: `cup-${i}` }, L.defs);
+  make("path", { d: `${d} Z` }, clip);
+  const c = {
+    n: i + 1, cx, cy, top, bottom, m,
+    glow: make("circle", { cx, cy: cy + 2, r: 0, fill: "url(#g-hot)", opacity: 0 }, L.glow),
+    body: make("path", { d, fill: "#0b0b0b", stroke: "#3a3a3a", "stroke-width": 3, "stroke-linejoin": "round" }, L.cruc),
+  };
+  const g = make("g", { "clip-path": `url(#cup-${i})` }, L.cruc);
+  c.fill = make("rect", { x: cx - 30, y: bottom, width: 60, height: 0 }, g);
+  c.surface = make("rect", { x: cx - 30, y: bottom, width: 60, height: 2.5, fill: mix(GREY, YELLOW, 1), opacity: 0 }, g);
+  // The rim is drawn over the molten fill so the metal sits inside the cup.
+  c.rim = make("path", { d, fill: "none", stroke: "#3a3a3a", "stroke-width": 3, "stroke-linejoin": "round" }, L.cruc);
+  c.label = make("text", { x: cx, y: bottom + 18, "text-anchor": "middle", class: "sub" }, L.label);
+  crucibles.push(c);
+}
+
+function build(s) {
+  svg.textContent = "";
+  pipes = [];
+  crucibles = [];
+  L = {};
+  L.defs = make("defs", {}, svg);
+  gradient(L.defs, "g-hot", [["0", "#fffbe6", 1], ["0.25", "#ffd23f", 0.9], ["0.55", "#ff7a00", 0.45], ["1", "#ff3d00", 0]]);
+  gradient(L.defs, "g-white", [["0", "#ffffff", 1], ["0.3", "#fff4d6", 0.85], ["0.6", "#ffd9a0", 0.35], ["1", "#ffd9a0", 0]]);
+  gradient(L.defs, "g-red", [["0", "#ffb0a0", 1], ["0.3", "#ff2a1a", 0.8], ["1", "#ff0000", 0]]);
+  for (const name of ["trough", "metal", "glow", "cruc", "top", "label"]) L[name] = make("g", {}, svg);
+
+  // Lanes per wave, sorted by id inside a wave; unknown waves sort last.
+  const waves = new Map();
+  for (const n of [...s.nodes].sort((a, b) => a.wave - b.wave || a.id.localeCompare(b.id))) {
+    if (!waves.has(n.wave)) waves.set(n.wave, []);
+    waves.get(n.wave).push(n);
+  }
+  const maxLanes = Math.max(1, ...[...waves.values()].map((w) => w.length));
+  const bodyH = Math.max(maxLanes * LANE_H, 3 * CRUCIBLE_GAP);
+  const midY = TOP + bodyH / 2;
+  const col = (x, text) => make("text", { x, y: TOP - 34, class: "col" }, L.label).textContent = text;
+
+  let x = 44;
+  col(x - 4, "SCOUT");
+  const scout = addChannel("ch:scout", x, x + 100, midY, "scout");
+  x += 160;
+  col(x - 4, "PLAN");
+  const plan = addChannel("ch:plan", x, x + 100, midY, "plan");
+  addLink("ln:scout>plan", scout.x2, midY, plan.x1, midY, (st) => !["pending", "scouting"].includes(st.plan.status));
+  x += 160;
+
+  const byId = new Map();
+  for (const [wave, nodes] of waves) {
+    col(x + 16, `WAVE ${wave}`);
+    nodes.forEach((n, i) => {
+      const y = midY + (i - (nodes.length - 1) / 2) * LANE_H;
+      byId.set(n.id, addChannel(`ch:${n.id}`, x + 20, x + 190, y, n.id));
+    });
+    x += 250;
+  }
+
+  const fromNode = (id) => (st) => {
+    const n = st.nodes.find((m) => m.id === id);
+    return !!n && (n.status === "merged" || n.status === "ruled");
+  };
+  const fromPlan = (st) => st.plan.status === "approved";
+  const depended = new Set();
+  for (const n of s.nodes) {
+    const ch = byId.get(n.id);
+    const deps = n.deps.filter((d) => byId.has(d));
+    if (deps.length === 0) addLink(`ln:plan>${n.id}`, plan.x2, midY, ch.x1, ch.y, fromPlan);
+    for (const d of deps) {
+      depended.add(d);
+      const src = byId.get(d);
+      addLink(`ln:${d}>${n.id}`, src.x2, src.y, ch.x1, ch.y, fromNode(d));
+    }
+  }
+
+  // Council: inlet joins every leaf channel, splits to three crucibles, rejoins at the outlet.
+  councilLabel = make("text", { x: x + 4, y: TOP - 34, class: "col" }, L.label);
+  const inletX = x + 10, cx = x + 120, outletX = x + 240;
+  const leaves = s.nodes.filter((n) => !depended.has(n.id));
+  if (leaves.length === 0) addLink("ln:plan>council", plan.x2, midY, inletX, midY, fromPlan);
+  for (const n of leaves) {
+    const ch = byId.get(n.id);
+    addLink(`ln:${n.id}>council`, ch.x2, ch.y, inletX, midY, fromNode(n.id));
+  }
+  for (let i = 0; i < 3; i++) {
+    const cy = midY + (i - 1) * CRUCIBLE_GAP;
+    addLink(`ln:council>seat-${i + 1}`, inletX, midY, cx - 32, cy - 26, (st) => st.council.status !== "pending");
+    addCrucible(i, cx, cy);
+    addLink(`ln:seat-${i + 1}>ship`, cx + 30, cy - 4, outletX, midY, (st) => st.council.status === "clean" || st.council.status === "fix");
+  }
+
+  // Ship: an ingot that lights up and cools when the run is done.
+  const sx = outletX + 50;
+  col(sx, "SHIP");
+  addLink("ln:council>ship", outletX, midY, sx + 4, midY, (st) => st.run.status === "done");
+  ship = {
+    m: mem("ship"),
+    body: make("path", { d: `M${sx} ${midY + 16} L${sx + 8} ${midY - 16} L${sx + 56} ${midY - 16} L${sx + 64} ${midY + 16} Z`, fill: "#0b0b0b", stroke: "#3a3a3a", "stroke-width": 3, "stroke-linejoin": "round" }, L.cruc),
+    cap: make("rect", { x: sx - 8, y: midY - 14, width: 6, height: 28, rx: 1, fill: RED, opacity: 0 }, L.top),
+    label: make("text", { x: sx + 32, y: midY + 36, "text-anchor": "middle", class: "sub" }, L.label),
+  };
+
+  const width = sx + 64 + 44;
+  svg.setAttribute("viewBox", `0 0 ${width} ${TOP + bodyH + 40}`);
+}
+
+// Kickback replay length: a new round that arrives while metal is still in the channel recedes first,
+// so the retreat shows even when `fail` and the next `implement` land in the same update.
+const KICK_MS = 1400;
+
+// A status change restarts the pipe's clock; a link that just filled starts molten and cools.
+function setStatus(p, status, round) {
+  const m = p.m;
+  const now = performance.now();
+  const rerun = status === "pouring" && round > m.round && m.status !== null;
+  if (m.status !== status || rerun) {
+    if (p.kind === "link" && status === "filled" && m.status !== null) m.heat = 1;
+    m.since = now;
+    if (rerun && m.f > 0.02 && !reduce) {
+      m.kickUntil = now + KICK_MS;
+      m.since = m.kickUntil;
+    }
+    m.status = status;
+  }
+  m.round = round || 0;
+}
+
+function subText(status, round) {
+  if (status === "queued" || status === "merged") return status;
+  return `${status} r${round}`;
+}
+
+function applyState(s) {
+  state = s;
+  const idle = !s.run.id;
+  document.body.classList.toggle("idle", idle);
+  document.getElementById("empty-title").textContent = "no active run";
+  document.getElementById("run-id").textContent = s.run.id || "-";
+  document.getElementById("repo").textContent = s.run.repo || "-";
+  document.getElementById("goal").textContent = s.run.goal;
+  document.getElementById("goal").title = s.run.goal;
+  const rs = document.getElementById("run-status");
+  rs.textContent = idle ? "" : s.run.status;
+  rs.className = `st-${s.run.status}`;
+  if (idle) return;
+
+  const key = JSON.stringify(s.nodes.map((n) => [n.id, n.wave, n.deps]));
+  if (s.run.id !== layoutRun) {
+    // A different run starts from a cold forge; the same run keeps its animated values.
+    memory.clear();
+    layoutRun = s.run.id;
+    layoutKey = "";
+  }
+  if (key !== layoutKey) {
+    build(s);
+    layoutKey = key;
+  }
+
+  for (const p of pipes) {
+    if (p.kind === "link") {
+      setStatus(p, p.filled(s) ? "filled" : "queued", 0);
+      continue;
+    }
+    let status, round = 0, text;
+    if (p.id === "ch:scout") {
+      const ps = s.plan.status;
+      status = ps === "scouting" ? "pouring" : ps === "pending" ? "queued" : "passed";
+      text = { pouring: "scouting", queued: "waiting", passed: "done" }[status];
+    } else if (p.id === "ch:plan") {
+      const ps = s.plan.status;
+      status = ps === "drafting" ? "pouring"
+        : ps === "drafted" || ps === "revised" ? "review"
+        : ps === "approved" ? "passed" : "queued";
+      text = { pouring: "drafting", review: "awaiting approval", passed: "approved", queued: "waiting" }[status];
+    } else {
+      const n = s.nodes.find((m) => m.id === p.id.slice(3));
+      status = n.status;
+      round = n.round;
+      text = subText(status, round);
+      const showBadge = round >= 2 && status !== "queued";
+      p.badge.setAttribute("opacity", showBadge ? 1 : 0);
+      p.badgeText.textContent = `r${round}`;
+      p.badgeRing.setAttribute("stroke", SUB_COLOR[status]);
+      p.badgeText.setAttribute("fill", SUB_COLOR[status]);
+    }
+    setStatus(p, status, round);
+    p.sub.textContent = text;
+    p.sub.setAttribute("fill", SUB_COLOR[status]);
+  }
+
+  const council = s.council;
+  councilLabel.textContent = `COUNCIL ${council.status.toUpperCase()}`;
+  for (const c of crucibles) {
+    const seat = council.seats[c.n - 1];
+    setStatus(c, seat.status, 0);
+    c.label.textContent = seat.status === "done"
+      ? `seat ${c.n} ${seat.findings} finding${seat.findings === 1 ? "" : "s"}`
+      : `seat ${c.n} ${seat.status === "running" ? "pouring" : "pending"}`;
+    c.label.setAttribute("fill", seat.status === "running" ? SUB_COLOR.pouring : seat.status === "done" ? "#a8a8a8" : SUB_COLOR.queued);
+    c.rim.setAttribute("stroke", council.status === "fix" ? AMBER : "#3a3a3a");
+  }
+
+  setStatus(ship, s.run.status, 0);
+  ship.label.textContent = s.run.status === "done" ? "shipped" : s.run.status === "blocked" ? "blocked" : "waiting";
+  ship.label.setAttribute("fill", s.run.status === "done" ? "#a8a8a8" : s.run.status === "blocked" ? "#ff3b2a" : SUB_COLOR.queued);
+}
+
+// Targets for a channel or link: fill fraction, heat, glow mode and overlays.
+function targets(p, now) {
+  const m = p.m;
+  if (now < m.kickUntil) return { f: 0, heat: 1, glow: "red", recede: true };
+  switch (m.status) {
+    case "pouring": {
+      // The front only advances while pouring; a kickback empties the channel before the next pour.
+      const front = reduce ? 0.6 : 0.08 + 0.8 * (1 - Math.exp(-(now - m.since) / POUR_TAU_MS));
+      return { f: Math.max(m.fresh ? 0 : m.f, front), heat: 1, glow: "hot", flow: true };
+    }
+    case "review": return { f: 1, heat: 1, glow: "white" };
+    case "kickback": return { f: 0, heat: 1, glow: "red", recede: true };
+    case "passed": case "merged": case "filled": return { f: 1, heat: 0 };
+    case "ruled": return { f: 1, heat: 0, ruled: true };
+    // Blocked metal freezes where it stands, at least visibly inside the channel.
+    case "blocked": return { f: Math.max(m.f, 0.12), heat: 0, cap: true };
+    default: return { f: 0, heat: 1 };
+  }
+}
+
+// Stepped flicker for a kickback glow, deterministic in time.
+function flicker(s) {
+  const v = 0.5 + 0.25 * Math.sin(s * 29) + 0.25 * Math.sin(s * 13.7 + 1.3);
+  return v > 0.62 ? 1 : v * 0.55;
+}
+
+function frameChannel(p, tg, dt, s, snap) {
+  const m = p.m;
+  const fx = p.x1 + m.f * p.len;
+  const visible = m.f * p.len > 1.5;
+  for (const el of [p.metal, p.core, p.flow]) el.setAttribute("x2", fx);
+  p.metal.setAttribute("opacity", visible ? 1 : 0);
+  p.metal.setAttribute("stroke", tg.ruled ? AMBER : mix(GREY, ORANGE, m.heat));
+  p.metal.setAttribute("stroke-dasharray", tg.ruled ? "7 6" : "none");
+  p.metal.setAttribute("stroke-linecap", tg.ruled ? "butt" : "round");
+  p.core.setAttribute("stroke", mix(GREY, YELLOW, m.heat));
+  p.core.setAttribute("opacity", visible && !tg.ruled ? 0.95 * m.heat : 0);
+  if (!reduce) m.dash -= dt * 40;
+  p.flow.setAttribute("stroke-dashoffset", m.dash);
+  p.flow.setAttribute("opacity", tg.flow && !reduce && visible ? 0.75 : 0);
+
+  if (tg.glow) m.glowMode = tg.glow;
+  m.glowA = snap ? (tg.glow ? 1 : 0) : ease(m.glowA, tg.glow ? 1 : 0, 6, dt);
+  let r = 17, op = 1;
+  if (m.glowMode === "hot") {
+    const pulse = reduce ? 0 : Math.sin(s * 5);
+    r = 17 + 3 * pulse;
+    op = 0.92 + 0.08 * pulse;
+  } else if (m.glowMode === "white") {
+    r = 19;
+  } else {
+    r = 15;
+    op = reduce ? 0.85 : 0.3 + 0.7 * flicker(s);
+  }
+  p.glow.setAttribute("fill", `url(#g-${m.glowMode})`);
+  p.glow.setAttribute("cx", fx);
+  p.glow.setAttribute("r", r);
+  p.glow.setAttribute("opacity", m.glowA * op);
+  p.cap.setAttribute("x", fx - 3);
+  p.cap.setAttribute("opacity", tg.cap ? 1 : 0);
+}
+
+function frameLink(p) {
+  const m = p.m;
+  const shown = m.f * p.len;
+  const dash = `${shown} ${p.len + 10}`;
+  p.metal.setAttribute("stroke-dasharray", dash);
+  p.core.setAttribute("stroke-dasharray", dash);
+  p.metal.setAttribute("stroke", mix(GREY, ORANGE, m.heat));
+  p.core.setAttribute("stroke", mix(GREY, YELLOW, m.heat));
+  p.metal.setAttribute("opacity", shown > 0.5 ? 1 : 0);
+  p.core.setAttribute("opacity", shown > 0.5 ? 0.9 * m.heat : 0);
+}
+
+function frameCrucible(c, dt, now, s) {
+  const m = c.m;
+  const cs = state.council.status;
+  const cooled = cs === "clean" || cs === "fix";
+  let level = 0, heat = 1, glow = 0, glowR = 0;
+  if (m.status === "running") {
+    level = reduce ? 0.4 : 0.12 + 0.5 * (1 - Math.exp(-(now - m.since) / 120000));
+    glow = 0.45;
+    glowR = 30 + (reduce ? 0 : 2 * Math.sin(s * 4 + c.n));
+  } else if (m.status === "done") {
+    level = 1;
+    heat = cooled ? 0 : 0.85;
+  }
+  // Chair verification: all three crucibles glow together.
+  if (cs === "verify") {
+    glow = 1;
+    glowR = 46 + (reduce ? 0 : 4 * Math.sin(s * 3));
+  }
+  const snap = m.fresh || reduce;
+  m.f = snap ? level : ease(m.f, level, 2, dt);
+  m.heat = snap ? heat : heatStep(m.heat, heat, dt);
+  m.glowA = snap ? glow : ease(m.glowA, glow, 4, dt);
+  m.fresh = false;
+  const h = m.f * (c.bottom - c.top);
+  c.fill.setAttribute("y", c.bottom - h);
+  c.fill.setAttribute("height", h);
+  c.fill.setAttribute("fill", mix(GREY, ORANGE, m.heat));
+  c.surface.setAttribute("y", c.bottom - h);
+  c.surface.setAttribute("fill", mix(GREY, YELLOW, m.heat));
+  c.surface.setAttribute("opacity", h > 1 ? m.heat : 0);
+  c.glow.setAttribute("r", glowR || 30);
+  c.glow.setAttribute("opacity", m.glowA);
+}
+
+function frameShip(dt) {
+  const m = ship.m;
+  const done = m.status === "done";
+  if (m.fresh || reduce) {
+    m.heat = 0;
+  } else if (done && m.lastStatus !== "done") {
+    m.heat = 1;
+  }
+  m.lastStatus = m.status;
+  m.fresh = false;
+  m.heat = heatStep(m.heat, 0, dt);
+  ship.body.setAttribute("fill", done ? mix([120, 120, 120], ORANGE, m.heat) : "#0b0b0b");
+  ship.body.setAttribute("stroke", m.status === "blocked" ? RED : done ? mix([150, 150, 150], YELLOW, m.heat) : "#3a3a3a");
+  ship.cap.setAttribute("opacity", m.status === "blocked" ? 1 : 0);
+}
+
+function elapsedText() {
+  const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(state.run.id);
+  if (!match) return "-";
+  // run-id carries the start minute in UTC, matching ledger timestamps.
+  const start = Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5]);
+  const finished = state.run.status === "done" || state.run.status === "blocked";
+  const end = finished && state.updatedAt ? Date.parse(state.updatedAt) : Date.now();
+  const total = Math.max(0, Math.floor((end - start) / 1000));
+  const h = Math.floor(total / 3600), mm = Math.floor(total / 60) % 60, ss = total % 60;
+  const pad = (v) => String(v).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(mm)}:${pad(ss)}` : `${mm}:${pad(ss)}`;
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  const s = now / 1000;
+  if (state && state.run.id && L) {
+    for (const p of pipes) {
+      const m = p.m;
+      const tg = targets(p, now);
+      const snap = m.fresh || reduce;
+      // Kickback recedes a little slower than a pour advances, so the retreat reads.
+      m.f = snap ? tg.f : ease(m.f, tg.f, tg.recede ? 1.6 : 2.5, dt);
+      m.heat = snap ? tg.heat : heatStep(m.heat, tg.heat, dt);
+      if (p.kind === "channel") frameChannel(p, tg, dt, s, snap);
+      else frameLink(p);
+      m.fresh = false;
+    }
+    for (const c of crucibles) frameCrucible(c, dt, now, s);
+    frameShip(dt);
+    const el = document.getElementById("elapsed");
+    const text = elapsedText();
+    if (el.textContent !== text) el.textContent = text;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+const conn = document.getElementById("conn");
+function connect() {
+  const es = new EventSource("/events");
+  es.onopen = () => {
+    conn.classList.add("live");
+    conn.textContent = "live";
+  };
+  es.onmessage = (e) => {
+    let next;
+    try {
+      next = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    applyState(next);
+  };
+  es.onerror = () => {
+    conn.classList.remove("live");
+    conn.textContent = "reconnecting";
+    // EventSource retries by itself unless the stream is closed for good.
+    if (es.readyState === EventSource.CLOSED) {
+      es.close();
+      setTimeout(connect, 2000);
+    }
+  };
+}
+connect();
+</script>
+</body>
+</html>

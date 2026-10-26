@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# fence-check: list changed paths that fall outside a plan node's fence.
+#
+# Usage: fence-check <node-file> <base> <head>   (run inside the repo)
+# Fence entries are the list items under `## Fence` up to the next `## ` heading;
+# the first whitespace-separated token after `- ` is the entry, with backticks stripped.
+# Entry semantics (docs/CONTRACT.md "Plan node file"):
+#   trailing `/`            directory prefix, matches everything below
+#   contains * ? or [       bash pattern; * also matches /
+#   anything else           exact path
+# Changed paths come from `git diff --no-renames`, so a rename contributes both its old and new path.
+# Prints each violating path, one per line. Exit 0 clean, 1 on violations, 2 on usage or input errors.
+set -euo pipefail
+
+usage() {
+  printf 'fence-check: %s\n' "$1" >&2
+  printf '%s\n' "usage: fence-check <node-file> <base> <head>" >&2
+  exit 2
+}
+
+[ "$#" -eq 3 ] || usage "expected 3 arguments"
+node_file=$1
+base=$2
+head=$3
+
+[ -f "$node_file" ] || usage "node file not found: $node_file"
+grep -q '^## Fence[[:space:]]*$' "$node_file" || usage "no '## Fence' section in $node_file"
+git rev-parse -q --verify "$base^{commit}" >/dev/null || usage "unknown base revision: $base"
+git rev-parse -q --verify "$head^{commit}" >/dev/null || usage "unknown head revision: $head"
+
+# Newline-separated fence entries.
+fence=$(awk '
+  /^## / { inside = ($0 ~ /^## Fence[[:space:]]*$/); next }
+  inside && /^[[:space:]]*- / {
+    sub(/^[[:space:]]*- [[:space:]]*/, "")
+    gsub(/`/, "")
+    split($0, tok, /[[:space:]]+/)
+    if (tok[1] != "") print tok[1]
+  }
+' "$node_file")
+
+# Returns 0 when the path is inside at least one fence entry.
+in_fence() {
+  local path=$1 entry
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    entry=${entry#./}
+    case "$entry" in
+      */)
+        [[ "$path" == "$entry"* ]] && return 0
+        ;;
+      *[*?[]*)
+        # Unquoted right side is a pattern; [[ ]] matching lets * cross /.
+        [[ "$path" == $entry ]] && return 0
+        ;;
+      *)
+        [ "$path" = "$entry" ] && return 0
+        ;;
+    esac
+  done <<EOF
+$fence
+EOF
+  return 1
+}
+
+changed=$(git -c core.quotePath=false diff --no-renames --no-ext-diff --name-only "$base" "$head")
+
+violations=0
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  if ! in_fence "$path"; then
+    printf '%s\n' "$path"
+    violations=$((violations + 1))
+  fi
+done <<EOF
+$changed
+EOF
+
+[ "$violations" -eq 0 ] || exit 1

@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# run-init: start a node-loop run in the current git repo.
+#
+# Usage: run-init "<goal>"   (run inside the target repo)
+# Refuses a dirty working tree (including untracked files), a detached HEAD or a repo without commits,
+# because the run branch must start from a clean, named base the orchestrator can diff against.
+# Creates $NODE_LOOP_HOME/<repo-slug>/<run-id>/ (layout in docs/CONTRACT.md "Run dir"),
+# creates RUN_BRANCH=node-loop/<run-id> from HEAD and checks it out,
+# writes goal.md, meta.env and the empty append-only files, then logs `run start` via ./ledger.
+# meta.env values are shell-quoted with printf %q so it can be sourced; plain paths stay unquoted.
+# The last output line is the absolute run dir path.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+die() {
+  printf 'run-init: %s\n' "$1" >&2
+  exit 1
+}
+
+[ "$#" -eq 1 ] || {
+  printf '%s\n' 'usage: run-init "<goal>"' >&2
+  exit 2
+}
+goal=$1
+[ -n "$(printf '%s' "$goal" | tr -d '[:space:]')" ] || die "goal is empty"
+
+repo=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git repository"
+cd "$repo"
+
+base_branch=$(git symbolic-ref -q --short HEAD) || die "HEAD is detached; check out a branch first"
+base_sha=$(git rev-parse -q --verify 'HEAD^{commit}') || die "branch '$base_branch' has no commits yet"
+
+if [ -n "$(git status --porcelain)" ]; then
+  die "working tree is dirty; commit or stash changes (including untracked files) first"
+fi
+
+# Goal slug: lowercase, runs of other characters become one dash, max 32 chars, no edge dashes.
+first_line=$(printf '%s\n' "$goal" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -m 1 . || true)
+slug=$(printf '%s' "$first_line" | tr '[:upper:]' '[:lower:]' | LC_ALL=C sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-//')
+slug=${slug:0:32}
+slug=${slug%-}
+[ -n "$slug" ] || slug="run"
+# UTC, so run ids line up with ledger timestamps.
+run_id="$(date -u +%Y%m%d-%H%M)-$slug"
+run_branch="node-loop/$run_id"
+repo_slug=$(basename "$repo")
+
+home=${NODE_LOOP_HOME:-$HOME/.omp/node-loop}
+mkdir -p "$home"
+home=$(cd "$home" && pwd)
+run_dir="$home/$repo_slug/$run_id"
+
+[ ! -e "$run_dir" ] || die "run dir already exists: $run_dir (wait a minute or change the goal)"
+if git show-ref --verify --quiet "refs/heads/$run_branch"; then
+  die "branch already exists: $run_branch"
+fi
+
+git check-ref-format --branch "$run_branch" >/dev/null 2>&1 || die "invalid branch name: $run_branch"
+git checkout -q -b "$run_branch" "$base_sha" || die "could not create branch $run_branch"
+
+mkdir -p "$run_dir/scout" "$run_dir/nodes" "$run_dir/reports" "$run_dir/reviews" "$run_dir/council"
+
+printf '%s\n' "$goal" >"$run_dir/goal.md"
+{
+  printf 'REPO=%q\n' "$repo"
+  printf 'BASE_BRANCH=%q\n' "$base_branch"
+  printf 'RUN_BRANCH=%q\n' "$run_branch"
+  printf 'BASE_SHA=%q\n' "$base_sha"
+} >"$run_dir/meta.env"
+: >"$run_dir/contracts.md"
+: >"$run_dir/parking.md"
+: >"$run_dir/rulings.md"
+: >"$run_dir/ledger.md"
+
+short_sha=$(git rev-parse --short "$base_sha")
+"$SCRIPT_DIR/ledger" "$run_dir" run start "branch=$run_branch" "base=$short_sha" -- "${first_line:0:80}"
+
+printf '%s\n' "$run_dir"

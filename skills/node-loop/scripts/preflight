@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# preflight: verify the omp settings node-loop depends on before a run starts.
+#
+# Checks that every node-loop model role exists in `omp config get modelRoles`
+# and that task isolation is configured as branch mode without auto-apply.
+# omp silently falls back to the parent model when a role is missing, so a
+# missing role must stop the run here instead of degrading it later.
+# modelRoles prints as one-line JSON; it is parsed with grep/sed to avoid a jq dependency.
+# Prints `ok` and exits 0, or prints each problem plus `Run: exitnode setup` and exits 1.
+set -euo pipefail
+
+# Roles every node-loop agent references via `model: "@<role>"`.
+ROLES="node-plan node-implement node-review node-chair council-seat-1 council-seat-2 council-seat-3"
+
+# Isolation settings as `key=expected` pairs.
+ISOLATION="task.isolation.enabled=true task.isolation.merge=branch task.isolation.apply=false"
+
+problems=0
+
+problem() {
+  printf '%s\n' "$1"
+  problems=$((problems + 1))
+}
+
+if ! command -v omp >/dev/null 2>&1; then
+  printf '%s\n' "omp CLI not found on PATH"
+  exit 1
+fi
+
+if roles_json=$(omp config get modelRoles 2>/dev/null); then
+  for role in $ROLES; do
+    # Match `"role": "value"` with optional whitespace; the leading quote prevents suffix matches.
+    value=$(printf '%s' "$roles_json" \
+      | grep -o "\"$role\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
+      | head -n 1 \
+      | sed -e 's/^"[^"]*"[[:space:]]*:[[:space:]]*"//' -e 's/"$//' || true)
+    if [ -z "$value" ]; then
+      problem "model role missing: $role"
+    fi
+  done
+else
+  problem "could not read modelRoles (omp config get modelRoles failed)"
+fi
+
+for pair in $ISOLATION; do
+  key=${pair%%=*}
+  want=${pair#*=}
+  if got=$(omp config get "$key" 2>/dev/null); then
+    got=$(printf '%s' "$got" | tr -d '[:space:]')
+    if [ "$got" != "$want" ]; then
+      problem "$key is '$got', expected '$want'"
+    fi
+  else
+    problem "$key is not readable (omp config get $key failed)"
+  fi
+done
+
+if [ "$problems" -gt 0 ]; then
+  printf '%s\n' "Run: exitnode setup"
+  exit 1
+fi
+
+printf '%s\n' "ok"
