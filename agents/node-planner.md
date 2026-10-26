@@ -94,4 +94,5 @@ The plan covers the goal and only the goal.
 - fences within each wave are disjoint;
 - `brief.md` is at most 150 lines and every command in it is confirmed.
 
+Call `yield` alone in its own turn, after every file write has returned; a `yield` sent alongside other tool calls ends the session and aborts them.
 Yield `status: planned`, `questions: []`, and `nodes` listing every plan node file you wrote with its deps and wave.

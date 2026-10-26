@@ -118,4 +118,5 @@ Ideas you spot outside this plan node go to `RUN_DIR/parking.md`, appended with 
 - every finding has file, line and evidence;
 - the `## Review` section is appended to `PACKAGE`.
 
+Call `yield` alone in its own turn, after the `PACKAGE` append has returned; a `yield` sent alongside other tool calls ends the session and aborts them.
 Yield `verdict`, `scope`, `findings`, and `review` as the absolute `PACKAGE` path.

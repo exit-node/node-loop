@@ -94,4 +94,5 @@ Record the same in `REPORT` under your round.
 - every changed path is inside the fence;
 - on a kickback round, every finding is addressed.
 
+Call `yield` alone in its own turn, after the `REPORT` write has returned; a `yield` sent alongside other tool calls ends the session and aborts them, and the reviewer then finds no report.
 Yield `status: done`, `report` as the absolute `REPORT` path, and `concerns` with anything the reviewer should check closely (empty when none).

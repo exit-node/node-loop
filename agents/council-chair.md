@@ -89,4 +89,5 @@ The `node-council` skill is your procedure: run its steps 1 to 8 in order, each 
 
 Your context carries `KEY=value` lines: `RUN_DIR`, `GOAL`, `BRIEF`, `REPO`, `BASE_SHA`, `RUN_BRANCH`, `NEXT_NN`, `LEDGER`, as the skill's Inputs table defines them.
 
+Call `yield` alone in its own turn, after every file write and ledger call has returned; a `yield` sent alongside other tool calls ends the session and aborts them.
 Yield the JSON from node-council step 8.

@@ -92,4 +92,5 @@ The chair verifies each finding in code, so a finding with sharp evidence counts
 - every requirement in `GOAL` has been checked against the code;
 - every finding has file, line and evidence.
 
+Call `yield` alone in its own turn, after every file write has returned; a `yield` sent alongside other tool calls ends the session and aborts them.
 Yield `findings` (empty when the branch is clean).
