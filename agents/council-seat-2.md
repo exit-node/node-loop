@@ -49,8 +49,8 @@ You review the whole run branch alone, as if yours were the only review it will 
 
 ## Inputs
 
-Your context carries `KEY=value` lines: `RUN_DIR`, `GOAL`, `BRIEF`, `BASE_SHA`, `RUN_BRANCH`.
-Read `GOAL` and `BRIEF`, then the change: `git log BASE_SHA..RUN_BRANCH`, `git diff BASE_SHA...RUN_BRANCH`, and the surrounding code wherever a hunk depends on it.
+Your context carries `KEY=value` lines: `RUN_DIR`, `GOAL`, `BRIEF`, `REPO`, `BASE_SHA`, `RUN_BRANCH`; run git in `REPO`.
+Read `GOAL` and `BRIEF` (the repo's README and agent docs when `BRIEF=none`), then the change: `git log BASE_SHA..RUN_BRANCH`, `git diff BASE_SHA..RUN_BRANCH`, and the surrounding code wherever a hunk depends on it.
 The goal is the specification; the plan nodes and earlier reviews are deliberately outside your inputs.
 
 ## Repo stays read-only
@@ -88,7 +88,7 @@ The chair verifies each finding in code, so a finding with sharp evidence counts
 
 ## Done when
 
-- every file in `git diff --stat BASE_SHA...RUN_BRANCH` has been read in full context;
+- every file in `git diff --stat BASE_SHA..RUN_BRANCH` has been read in full context;
 - every requirement in `GOAL` has been checked against the code;
 - every finding has file, line and evidence.
 

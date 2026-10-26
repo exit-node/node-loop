@@ -32,9 +32,9 @@ Agents from the previous session are gone; every re-dispatch is a fresh agent wh
 | plan | `approved` | write any missing `queued` lines, then waves |
 | plan node | `queued` | step 5 in its wave |
 | plan node | `implement round=K agent=A` | if `omp/task/A` has commits beyond its merge-base with `RUN_BRANCH`, step 6 from item 2 with that branch; otherwise log `implement round=K agent=<new name>` and re-dispatch round K |
-| plan node | `review round=K` | if `reviews/<id>-rK.json` exists, step 6 item 6 with it; otherwise step 6 item 5 on the existing package |
+| plan node | `review round=K` | `BASE` and `HEAD` come from the `- Range:` line of `reviews/<id>-rK.md` (`grep -m1`); if `reviews/<id>-rK.json` exists, step 6 item 6 with it, otherwise step 6 item 5 on the existing package |
 | plan node | `pass` or `ruled` | `git cherry "$RUN_BRANCH" <branch>`: lines starting `+` are not landed yet, so run step 7 from item 2; when all lines start `-`, finish step 7 items 4 and 5 that are missing |
-| plan node | `fail` or `fence` | step 8 |
+| plan node | `fail` or `fence` | step 8, findings key from the ledger line: `fence` text → `FENCE_VIOLATIONS`; `fail` text `cherry-pick conflict: <paths>` → `CONFLICT_PATHS`; `fail` text `empty diff` → none; any other `fail` → `PREV_VERDICT` |
 | plan node | `merged` | nothing |
 | plan node | `blocked` | ask the user, as in step 9 |
 | council | `start` or `verify` | step 10: dispatch a fresh chair |

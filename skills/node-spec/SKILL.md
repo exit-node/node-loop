@@ -5,7 +5,6 @@ description: Plan node spec for node-loop - what a plan node is, its fence, sizi
 
 # Plan node spec
 
-The single definition of a plan node, shared by the planner (writes them), the implementer (builds one), the reviewer (judges one) and humans (approve the plan).
 File format: [`template.md`](template.md) in this skill directory.
 
 ## What a plan node is
@@ -21,7 +20,7 @@ Always say "plan node" or `nodes/NN-slug.md`, never bare "node", so nobody reads
 - **fence**: the paths a plan node owns (`## Fence`) plus its `## Out of scope` list. The implementer changes only fenced paths; `scripts/fence-check` lists every changed path outside it.
 - **creep**: a change the plan node did not ask for, inside or outside the fence. Ideas that occur along the way go to `parking.md`.
 - **shrink**: a stub, a TODO, a weakened or skipped test, or an unmet acceptance item.
-- **kickback**: a failed review or fence check; a new, fresh implementer redoes the plan node from the previous `.patch`.
+- **kickback**: a failed review, fence check or cherry-pick; a new, fresh implementer continues the plan node from the previous `.patch`.
 - **wave**: the set of plan nodes whose dependencies have all merged; they run in parallel.
 
 ## Fence syntax
@@ -58,9 +57,3 @@ A plan node with any of these smells gets split, merged or rewritten before the 
 - An acceptance item cannot be checked ("works well", "is clean", "handles errors properly"): rewrite it as an observable outcome with a command.
 - It only makes sense together with another plan node (neither can merge alone and stay green): merge them, or cut a contract plan node both depend on.
 - Its `Consumes:` names an interface no dependency `Exposes:`: add the dependency or the missing contract plan node.
-
-## Done when
-
-- Planner: every plan node file follows `template.md`, passes every sizing rule, and shows none of the smells.
-- Implementer: every acceptance item is checked off with its command's result in `reports/NN-slug.md`, and every changed path is inside the fence.
-- Reviewer: every acceptance item, the fence, creep and shrink are judged against the diff, each with evidence.

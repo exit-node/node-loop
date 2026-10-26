@@ -1,6 +1,6 @@
 ---
 name: node-reviewer
-description: Review one node-loop plan node's diff against its node file and report; own the fence, check every acceptance item, pass or fail.
+description: Review one node-loop plan node's diff against its plan node file and report; own the fence, check every acceptance item, pass or fail.
 model: "@node-review"
 thinking-level: high
 autoloadSkills:
@@ -75,7 +75,7 @@ Judge the diff on what it does; the plan node file is the specification.
 
 Walk the diff hunk by hunk against `## Goal`, `## Fence`, `## Out of scope` and `## Acceptance`.
 
-- **creep**: any change the plan node did not ask for, including good but unrequested refactors, renames, extra features, drive-by fixes and new dependencies. Good but unrequested is creep and fails the plan node.
+- **creep**: any change the plan node did not ask for, including good but unrequested refactors, renames, extra features, drive-by fixes and new dependencies.
 - **shrink**: stubs, placeholders, `TODO`s, no-op branches, weakened or skipped or deleted tests, loosened assertions, and any acceptance item left unmet.
 
 Each creep and shrink entry names the file and line and what it is.

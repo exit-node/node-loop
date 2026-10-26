@@ -13,7 +13,7 @@ Terms (plan node, fence, creep, shrink, kickback, wave) are defined in `skill://
 
 - **Scripts.** `scripts/<name>` means `<skill dir>/scripts/<name>`, where `<skill dir>` is the `[Skill directory: ...]` path appended to this skill. Use the absolute path in every command.
 - **Run state.** After step 2, every bash call starts with `RUN=<run dir>; source "$RUN/meta.env"`, giving `REPO`, `BASE_BRANCH`, `RUN_BRANCH`, `BASE_SHA`. Run git commands in `REPO` with `RUN_BRANCH` checked out.
-- **Ledger.** Every transition is one line written by `scripts/ledger "$RUN" <subject> <event> k=v... [-- text]`, before you act on it. Pass every key the CONTRACT grammar lists for the event; exit 2 means the line is malformed, so fix it and rerun until it appends. Events used below are written with all their keys.
+- **Ledger.** Every transition is one line written by `scripts/ledger "$RUN" <subject> <event> k=v... [-- text]`, before you act on it. Every key shown in the calls below is required; exit 2 prints the missing or invalid key, so fix the line and rerun until it appends.
 - **Paths only.** An agent's `context` and `task` carry `KEY=value` lines of absolute paths and short values, plus at most one instruction sentence. Agents read the files themselves; scout output, file contents and this conversation stay out of their prompts.
 - **Fresh agents.** Every dispatch is a new agent with a new name. Kickbacks go to a fresh implementer; finished agents are never messaged or revived.
 
@@ -64,7 +64,7 @@ Dispatch `node-planner`, not isolated, with context `RUN_DIR`, `GOAL` (`$RUN/goa
 
 Show the user the `plan.md` path and its plan node table, and ask for approval.
 This gate is hard: only the user's explicit approval opens it.
-On change requests, run `scripts/ledger "$RUN" plan revised -- <one-line summary>` and dispatch a fresh planner with the same context plus `PLAN_FEEDBACK=<the user's words verbatim>` in its task, then show the plan again.
+On change requests, run `scripts/ledger "$RUN" plan revised -- <one-line summary>`, dispatch a fresh planner with the same context plus `PLAN_FEEDBACK=<the user's words verbatim>` in its task, and handle its result as above, so the revised plan logs `plan done` before you show it again.
 On approval, run `scripts/ledger "$RUN" plan approved`, then for every plan node `scripts/ledger "$RUN" <id> queued wave=<W> deps=<a,b or ->`, and append one `Wave W` phase per wave with items `<id>: queued`.
 
 Done when the ledger shows `plan approved` and one `queued` line per plan node file in `nodes/`.
@@ -91,7 +91,6 @@ Handle each result as it arrives; other plan nodes keep running.
 4. Run `PACKAGE=$(scripts/review-package "$RUN" <id> <K> "$BASE" "$HEAD")` and `scripts/ledger "$RUN" <id> review round=<K>`.
 5. Dispatch `node-reviewer`, not isolated, `name: Rev<NN>r<K>`, with `RUN_DIR`, `BRIEF`, `NODE`, `REPORT`, `ROUND`, `PACKAGE`, `BASE`, `HEAD`. Save its JSON verbatim to `$RUN/reviews/<id>-r<K>.json`.
 6. The verdict is `fail` when any blocker or major exists or `scope.creep` or `scope.shrink` is non-empty, whatever the reviewer wrote. Pass goes to step 7. Fail: run `scripts/ledger "$RUN" <id> fail round=<K> blockers=<count> majors=<count> -- <top claim>` and go to step 8.
-7. Nits never fail a plan node; they reach `report.md` from the saved JSON.
 
 Done when the plan node has a saved verdict and a `pass` or `fail` path chosen, or a `fence` or `blocked` ledger line.
 
@@ -99,7 +98,7 @@ Done when the plan node has a saved verdict and a `pass` or `fail` path chosen, 
 
 1. Run `scripts/ledger "$RUN" <id> pass round=<K>`.
 2. On `RUN_BRANCH`, note `PRE=$(git rev-parse HEAD)` and run `git cherry-pick "$BASE..$HEAD"`.
-3. On conflict: `git cherry-pick --abort`, run `scripts/ledger "$RUN" <id> fail round=<K> blockers=1 majors=0 -- cherry-pick conflict: <paths>`, and kick back (step 8). The next implementer starts on the new `RUN_BRANCH` HEAD.
+3. On conflict: `git cherry-pick --abort`, run `scripts/ledger "$RUN" <id> fail round=<K> blockers=1 majors=0 -- cherry-pick conflict: <paths>`, and kick back (step 8) with `CONFLICT_PATHS`. The next implementer starts on the new `RUN_BRANCH` HEAD.
 4. Append to `contracts.md` a `## <id>` section holding the plan node's `Exposes:` line.
 5. Run `scripts/ledger "$RUN" <id> merged commits=<first short sha>..<last short sha>` from `git log --reverse --format=%h "$PRE..HEAD"`.
 
@@ -110,7 +109,11 @@ When every plan node of the wave is merged or blocked, close the wave phase and 
 
 After a `fail` or `fence` at round K:
 
-- K < 3: run `scripts/ledger "$RUN" <id> implement round=<K+1> agent=Impl<NN>r<K+1>` and dispatch a fresh `node-implementer` exactly as in step 5, one item, with `ROUND=<K+1>`, `PREV_PATCH=$RUN/reviews/<id>-r<K>.patch`, and either `PREV_VERDICT=$RUN/reviews/<id>-r<K>.json` or `FENCE_VIOLATIONS=<comma-joined paths>`. Then continue at step 6.
+- K < 3: run `scripts/ledger "$RUN" <id> implement round=<K+1> agent=Impl<NN>r<K+1>` and dispatch a fresh `node-implementer` exactly as in step 5, one item, with `ROUND=<K+1>`, `PREV_PATCH=$RUN/reviews/<id>-r<K>.patch` and the findings key of the kickback, then continue at step 6:
+  - review `fail`: `PREV_VERDICT=$RUN/reviews/<id>-r<K>.json`;
+  - `fence`: `FENCE_VIOLATIONS=<comma-joined paths>`;
+  - cherry-pick conflict: `CONFLICT_PATHS=<comma-joined paths>`;
+  - empty diff: no findings key and no `PREV_PATCH`.
 - K = 3: round 4 never starts; go to step 9.
 
 Done when the plan node has a new `implement` line or has reached step 9.
@@ -139,13 +142,13 @@ Done when the ledger shows a `council done` line after the last merge, and at mo
 
 ### 11. Finish
 
-Write `$RUN/report.md` with these sections:
+Write `$RUN/report.md` with these sections, appending file-backed ones with `cat "$RUN/<file>" >> "$RUN/report.md"` so their content stays out of your context:
 
 1. `## Result`: goal, `RUN_BRANCH`, `BASE_SHA..RUN_BRANCH`, final council verdict.
 2. `## Plan nodes`: one row per plan node with rounds used, outcome (merged, ruled, blocked) and commit range.
-3. `## Rulings`: every line of `rulings.md`.
-4. `## Nits`: every nit from `reviews/*.json` and `council/verdict.md`.
-5. `## Parking`: every line of `parking.md`.
+3. `## Rulings`: `rulings.md`.
+4. `## Nits`: every nit from the saved `reviews/*.json` verdicts and the last chair JSON's `verified` entries.
+5. `## Parking`: `parking.md`.
 6. `## Cleanup`: the `git branch -D` command for the merged `omp/task/*` branches.
 
 Run `scripts/ledger "$RUN" run done` (or `run blocked -- <reason>` when a plan node stayed blocked), close the `Finish` phase, and give the user the `report.md` path and `RUN_BRANCH`.

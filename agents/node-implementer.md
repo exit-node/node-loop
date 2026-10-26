@@ -40,7 +40,7 @@ A reviewer on a different model judges your diff against the plan node file alon
 
 ## Inputs
 
-Your context carries absolute paths as `KEY=value` lines: `RUN_DIR`, `BRIEF`, `CONTRACTS`, `PARKING`, `NODE`, `REPORT`, `ROUND`, `DEP_SECTIONS`, and on a kickback `PREV_PATCH` plus either `PREV_VERDICT` or `FENCE_VIOLATIONS`.
+Your context and task carry `KEY=value` lines of absolute paths and short values: `RUN_DIR`, `BRIEF`, `CONTRACTS`, `PARKING`, `NODE`, `REPORT`, `ROUND`, `DEP_SECTIONS`, and on a kickback `PREV_PATCH` plus one findings key: `PREV_VERDICT`, `FENCE_VIOLATIONS` or `CONFLICT_PATHS`.
 
 1. Read `NODE` and `BRIEF`.
 2. Read the `## NN-slug` sections of `CONTRACTS` named in `DEP_SECTIONS`; those sections are the interfaces you consume, and the code they describe is already on your branch.
@@ -49,12 +49,13 @@ Your context carries absolute paths as `KEY=value` lines: `RUN_DIR`, `BRIEF`, `C
 
 When `ROUND` is above 1, a previous implementer's work failed and you continue it.
 
-1. Restore that work: `git apply <PREV_PATCH>`.
+1. Restore that work when `PREV_PATCH` is set: `git apply --3way <PREV_PATCH>`, resolving any conflict it leaves.
 2. Read `REPORT` for the earlier rounds.
-3. Read the findings: `PREV_VERDICT` holds the reviewer's JSON and the path of its written reasoning; `FENCE_VIOLATIONS` lists paths changed outside the fence.
-4. Fix exactly those findings: revert every out-of-fence path, resolve every blocker and major, fill every `scope.shrink` item, remove every `scope.creep` item.
+3. Read the findings: `PREV_VERDICT` holds the reviewer's JSON and the path of its written reasoning; `FENCE_VIOLATIONS` lists paths changed outside the fence; `CONFLICT_PATHS` lists paths that clashed with work merged since.
+4. Fix exactly those findings: revert every out-of-fence path, resolve every blocker and major, fill every `scope.shrink` item, remove every `scope.creep` item, rebuild every conflicting change on the current code.
 
 The previous diff is the baseline; a kickback round changes only what the findings name.
+Without `PREV_PATCH` the previous round produced no diff: implement the plan node in full.
 
 ## Fence
 
@@ -68,7 +69,7 @@ Every acceptance item is met for real: full implementations, tests that assert t
 
 Follow the conventions and commands in `BRIEF`.
 Run every command listed under `## Acceptance` in `NODE`, plus the brief's lint and typecheck commands for the files you touched.
-Append to `REPORT` (create it if absent) with `cat >> <REPORT>`:
+Append to `REPORT` with `cat >> <REPORT>`:
 
 ```
 ## Round K

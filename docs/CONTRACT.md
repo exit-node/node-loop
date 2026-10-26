@@ -211,8 +211,8 @@ Example:
 4. `node-planner` writes `brief.md`, `plan.md`, `nodes/*.md`. User approves `plan.md` (hard gate). ledger `plan approved`.
 5. Per wave: dispatch one `node-implementer` per ready plan node, `isolated: true`, all in one `task` call. Context field: run dir, node path, brief path, report path, dep contract sections, and on round > 1 the previous `.patch` and review paths.
 6. On each result: `fence-check` on `branchBaseSha..branchName` (fail = automatic kickback, no reviewer); else `review-package` then `node-reviewer` (not isolated, reads package + node + report).
-7. Pass: cherry-pick the branch commits onto `RUN_BRANCH`, append Exposes to `contracts.md`, ledger `merged`. Cherry-pick conflict = kickback on the new base.
-8. Fail: new fresh `node-implementer` (never revive the old agent), round+1, max 3 rounds. Nits never kick back; they go to `report.md`.
+7. Pass: cherry-pick the branch commits onto `RUN_BRANCH`, append Exposes to `contracts.md`, ledger `merged`. Cherry-pick conflict = kickback on the new base with `CONFLICT_PATHS`.
+8. Fail: new fresh `node-implementer` (never revive the old agent), round+1, max 3 rounds. It gets exactly one findings key: `PREV_VERDICT` (review fail), `FENCE_VIOLATIONS` (fence), `CONFLICT_PATHS` (cherry-pick conflict), or none for an empty diff; plus `PREV_PATCH` when a diff exists. Nits never kick back; they go to `report.md`.
 9. After round 3 fails: each open finding gets a ruling in `rulings.md` (reviewer wrong, or real but nothing depends on it) or the run stops and asks the user (real and a later node depends on it). No silent drops.
 10. All plan nodes merged: `council-chair` (not isolated) reviews `BASE_SHA..RUN_BRANCH`. `verdict: fix` → its fix nodes enter the loop as a new wave; second council run after fixes, then stop.
 11. Write `report.md` (merged nodes, rulings, nits, parking, council result); ledger `run done`.

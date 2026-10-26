@@ -13,11 +13,7 @@ Delete these comments when filling the template.
 
 ## Fence
 
-<!--
-One "- " item per owned path. The first token is the path; the rest of the line is a note.
-fence-check reads only these first tokens.
-Include files this plan node creates.
--->
+<!-- One "- " item per owned path, including files this plan node creates; syntax in node-spec "Fence syntax". -->
 - path/exact.ts            exact file
 - src/auth/                directory prefix: everything below
 - src/**/*.test.ts         bash pattern; * also matches /
@@ -39,7 +35,7 @@ Exposes: none
 
 ## Acceptance
 
-<!-- One checkable statement per item, each with the exact command that proves it. The reviewer runs these commands. -->
+<!-- One checkable statement per item with the exact command that proves it; see node-spec "Acceptance". -->
 - [ ] checkable statement - `exact command proving it`
 
 ## Depends on

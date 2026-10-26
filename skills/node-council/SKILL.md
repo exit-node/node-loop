@@ -29,9 +29,9 @@ Map the inputs before step 1:
 
 - `REPO`: `git rev-parse --show-toplevel`. `RUN_BRANCH`: the branch the user named, else the current branch.
 - `BASE_SHA`: `git merge-base <base> RUN_BRANCH`, where `<base>` is the branch the user named, else the repo's default branch.
-- `RUN_DIR`: create `${NODE_LOOP_HOME:-~/.omp/node-loop}/<repo-slug>/<YYYYMMDD-HHMM>-council-<branch-slug>/` with `council/` and `nodes/` inside.
+- `RUN_DIR`: create `${NODE_LOOP_HOME:-$HOME/.omp/node-loop}/<repo-slug>/<YYYYMMDD-HHMM>-council-<branch-slug>/` with `council/` and `nodes/` inside.
 - `GOAL`: write `RUN_DIR/goal.md` from the user's statement of what the branch is for (or the PR description); ask the user when neither exists, because the creep check needs it.
-- `BRIEF`: none; seats read the repo's own docs.
+- `BRIEF`: `none`; seats then read the repo's own README and agent docs.
 - `NEXT_NN`: `01`.
 - `LEDGER`: the `scripts/ledger` in the node-loop skill directory when installed; without it, skip every ledger line below.
 
