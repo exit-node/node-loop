@@ -1,0 +1,13 @@
+{
+  "name": "node-loop",
+  "version": "0.1.0",
+  "description": "Scout, plan, implement, review and council loop for omp, built from plan nodes.",
+  "private": true,
+  "license": "MIT",
+  "author": "Exit Node <hello@exitnode.dev>",
+  "repository": "github:exit-node/node-loop",
+  "type": "module",
+  "omp": {
+    "extensions": ["extensions/node-loop/index.ts"]
+  }
+}

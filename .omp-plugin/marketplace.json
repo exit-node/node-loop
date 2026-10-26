@@ -1,0 +1,17 @@
+{
+  "name": "exit-node",
+  "owner": { "name": "Exit Node", "email": "hello@exitnode.dev" },
+  "metadata": { "description": "Exit Node agent workflows for omp" },
+  "plugins": [
+    {
+      "name": "node-loop",
+      "description": "Scout, plan, implement, review and council loop built from plan nodes.",
+      "source": "./",
+      "version": "0.1.0",
+      "license": "MIT",
+      "homepage": "https://github.com/exit-node/node-loop",
+      "category": "development",
+      "keywords": ["agents", "review", "council", "omp"]
+    }
+  ]
+}
