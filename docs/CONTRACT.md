@@ -150,7 +150,7 @@ council-chair:
 Consumes: <interfaces from deps' contracts.md sections, or "none">
 Exposes: <interfaces later nodes rely on, or "none">
 ## Acceptance
-- [ ] checkable statement — `exact command proving it`
+- [ ] checkable statement - `exact command proving it`
 ## Depends on
 NN-slug, NN-slug | none
 ```
