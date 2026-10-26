@@ -97,10 +97,10 @@ Done when the plan node has a saved verdict and a `pass` or `fail` path chosen, 
 ### 7. Pass: land the work
 
 1. Run `scripts/ledger "$RUN" <id> pass round=<K>`.
-2. On `RUN_BRANCH`, note `PRE=$(git rev-parse HEAD)` and run `git cherry-pick "$BASE..$HEAD"`.
-3. On conflict: `git cherry-pick --abort`, run `scripts/ledger "$RUN" <id> fail round=<K> blockers=1 majors=0 -- cherry-pick conflict: <paths>`, and kick back (step 8) with `CONFLICT_PATHS`. The next implementer starts on the new `RUN_BRANCH` HEAD.
+2. On `RUN_BRANCH`, run `git cherry-pick --no-commit "$BASE..$HEAD"`, then `git commit -m "<id>: <goal line from the plan node heading>"`. One commit per plan node keeps the run branch readable; the task branch's generic commit messages never reach it.
+3. On conflict: `git cherry-pick --abort` (or `git reset --hard HEAD` when nothing is staged yet), run `scripts/ledger "$RUN" <id> fail round=<K> blockers=1 majors=0 -- cherry-pick conflict: <paths>`, and kick back (step 8) with `CONFLICT_PATHS`. The next implementer starts on the new `RUN_BRANCH` HEAD.
 4. Append to `contracts.md` a `## <id>` section holding the plan node's `Exposes:` line.
-5. Run `scripts/ledger "$RUN" <id> merged commits=<first short sha>..<last short sha>` from `git log --reverse --format=%h "$PRE..HEAD"`.
+5. Run `scripts/ledger "$RUN" <id> merged commits=<short sha>..<short sha>` with the new commit's short sha on both sides.
 
 Done when the commits are on `RUN_BRANCH`, `contracts.md` has the `## <id>` section, and the ledger shows `merged`.
 When every plan node of the wave is merged or blocked, close the wave phase and dispatch the next wave (step 5).
