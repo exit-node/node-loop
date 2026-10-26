@@ -2,7 +2,9 @@
  * `exitnode setup`: pick a model for every node-loop role and set the task isolation settings.
  *
  * Flow: one picker per role (CONTRACT.md "Model roles" order), one isolation item, one summary confirm.
- * Nothing is written until the confirm; cancelling any dialog writes nothing.
+ * Each role picker has two steps because `ctx.models.list()` holds hundreds of models (all of OpenRouter):
+ * first a provider (or "Keep <current>" / the author default, which skip step two), then a model id
+ * within that provider. Nothing is written until the confirm; cancelling any dialog writes nothing.
  *
  * Writes go through the settings registry handles (`lookup(id)` from `config/registry`):
  * `modelRoles` is a record setting, so each role is written with `setEntry`, which touches only that
@@ -41,10 +43,37 @@ interface SettingHandle {
   provenance?(scope: Scope): string;
 }
 
-// Picker label suffixes; they are stripped back off through the label -> value map.
+// Picker label suffixes and prefixes; they are stripped back off through the label -> value map.
 const CURRENT_MARK = "  (current)";
-const FALLBACK_MARK = "  (author default)";
+const KEEP_PREFIX = "Keep ";
+const FALLBACK_PREFIX = "Author default ";
 const CANCELLED = "exitnode setup cancelled; nothing written.";
+// Dated snapshot ids (`claude-sonnet-4-20250514`) duplicate their undated alias; hide them to cut noise.
+const DATE_STAMP = /-\d{8}$/;
+const NATURAL = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+/** Splits `provider/id` at the first slash; OpenRouter ids keep their inner slash (`openrouter/anthropic/claude-...`). */
+function splitModel(value: string): { provider: string; id: string } {
+  const slash = value.indexOf("/");
+  return slash < 0 ? { provider: value, id: "" } : { provider: value.slice(0, slash), id: value.slice(slash + 1) };
+}
+
+/** Provider -> model ids, undated ids only (a provider with nothing but dated ids keeps them), newest-looking first. */
+export function groupModels(models: readonly { provider: string; id: string }[]): Map<string, string[]> {
+  const all = new Map<string, Set<string>>();
+  for (const { provider, id } of models) {
+    let ids = all.get(provider);
+    if (!ids) all.set(provider, (ids = new Set()));
+    ids.add(id);
+  }
+  const grouped = new Map<string, string[]>();
+  for (const provider of [...all.keys()].sort(NATURAL.compare)) {
+    const ids = [...all.get(provider)!];
+    const undated = ids.filter(id => !DATE_STAMP.test(id));
+    grouped.set(provider, (undated.length > 0 ? undated : ids).sort((a, b) => NATURAL.compare(b, a)));
+  }
+  return grouped;
+}
 
 function readRoles(value: unknown): Record<string, string> {
   const roles: Record<string, string> = {};
@@ -78,23 +107,40 @@ function report(pi: ExtensionAPI, ctx: ExtensionContext, text: string, level: "i
   pi.logger.info(`node-loop setup: ${text}`);
 }
 
-/** One role picker. Current value first (Enter keeps it), author default second, then every available model. */
+/**
+ * One role picker in two steps. Step one: "Keep <current>" (skips step two), the author default when it differs
+ * (also skips step two), then every provider with the current one first. Step two: that provider's model ids,
+ * the current model first. Returns undefined when either dialog is cancelled.
+ */
 async function pickRole(
   ctx: ExtensionContext,
   step: number,
   spec: (typeof ROLES)[number],
   current: string | undefined,
-  models: string[],
+  providers: Map<string, string[]>,
 ): Promise<string | undefined> {
-  const labels = new Map<string, string>();
-  if (current) labels.set(current + CURRENT_MARK, current);
-  if (spec.fallback !== current) labels.set(spec.fallback + FALLBACK_MARK, spec.fallback);
-  for (const model of models) {
-    if (model !== current && model !== spec.fallback) labels.set(model, model);
-  }
   const title = `exitnode setup ${step}/${ROLES.length + 1}: model for ${spec.role} (agent ${spec.agent})`;
-  const choice = await ctx.ui.select(title, [...labels.keys()]);
-  return choice === undefined ? undefined : labels.get(choice);
+  const cur = current ? splitModel(current) : undefined;
+
+  const first = new Map<string, { value: string } | { provider: string }>();
+  if (current) first.set(KEEP_PREFIX + current, { value: current });
+  if (spec.fallback !== current) first.set(FALLBACK_PREFIX + spec.fallback, { value: spec.fallback });
+  if (cur && providers.has(cur.provider)) first.set(cur.provider + CURRENT_MARK, { provider: cur.provider });
+  for (const provider of providers.keys()) {
+    if (provider !== cur?.provider) first.set(provider, { provider });
+  }
+  const firstChoice = await ctx.ui.select(`${title}: provider`, [...first.keys()]);
+  const picked = firstChoice === undefined ? undefined : first.get(firstChoice);
+  if (!picked) return undefined;
+  if ("value" in picked) return picked.value;
+
+  const second = new Map<string, string>();
+  if (cur?.provider === picked.provider && cur.id) second.set(cur.id + CURRENT_MARK, current!);
+  for (const id of providers.get(picked.provider) ?? []) {
+    if (!(cur?.provider === picked.provider && id === cur.id)) second.set(id, `${picked.provider}/${id}`);
+  }
+  const choice = await ctx.ui.select(`${title}: ${picked.provider} model`, [...second.keys()]);
+  return choice === undefined ? undefined : second.get(choice);
 }
 
 export async function runSetup(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
@@ -111,10 +157,10 @@ export async function runSetup(pi: ExtensionAPI, ctx: ExtensionContext): Promise
     return;
   }
 
-  const models = [...new Set(ctx.models.list().map(model => `${model.provider}/${model.id}`))].sort();
+  const providers = groupModels(ctx.models.list());
   const picks: Record<string, string> = {};
   for (const [index, spec] of ROLES.entries()) {
-    const pick = await pickRole(ctx, index + 1, spec, current[spec.role], models);
+    const pick = await pickRole(ctx, index + 1, spec, current[spec.role], providers);
     if (pick === undefined) {
       ctx.ui.notify(CANCELLED, "info");
       return;

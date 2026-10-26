@@ -30,11 +30,8 @@ const HEARTBEAT_MS = 15000;
 // Coalesces bursts of fs.watch events from one append.
 const DEBOUNCE_MS = 50;
 
-// Bun exposes import.meta.dir; Node only has import.meta.url.
-const MODULE_DIR =
-  "dir" in import.meta && typeof import.meta.dir === "string"
-    ? import.meta.dir
-    : dirname(fileURLToPath(import.meta.url));
+// import.meta.url works in both Bun and Node; import.meta.dir is Bun-only.
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 
 interface Active {
   ledger: string;
