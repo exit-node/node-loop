@@ -208,7 +208,7 @@ Example:
 1. `preflight`; stop on failure.
 2. `run-init`; resume instead when the user says resume: rebuild `todo` from `ledger.md`.
 3. Scouts (bundled `scout`, parallel, read-only) write `scout/*.md`.
-4. `node-planner` writes `brief.md`, `plan.md`, `nodes/*.md`. User approves `plan.md` (hard gate). ledger `plan approved`.
+4. `node-planner` writes `brief.md`, `plan.md`, `nodes/*.md`. The orchestrator posts the plan to the user as information and continues without waiting; ledger `plan approved` marks it final. Planner `needs-input` questions still wait for answers.
 5. Per wave: dispatch one `node-implementer` per ready plan node, `isolated: true`, all in one `task` call. Context field: run dir, node path, brief path, report path, dep contract sections, and on round > 1 the previous `.patch` and review paths.
 6. On each result: `fence-check` on `branchBaseSha..branchName` (fail = automatic kickback, no reviewer); else `review-package` then `node-reviewer` (not isolated, reads package + node + report).
 7. Pass: cherry-pick the branch commits onto `RUN_BRANCH`, append Exposes to `contracts.md`, ledger `merged`. Cherry-pick conflict = kickback on the new base with `CONFLICT_PATHS`.

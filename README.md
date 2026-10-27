@@ -22,13 +22,14 @@ exitnode add magic-link login to the API
 | `exitnode view` | Open the live forge view in your browser |
 
 `exitnode` only triggers as the first word of a prompt; `/exitnode ...` works too.
+Restart omp after installing; a session that was already open never loads the keyword.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-  G[goal] --> S[scouts] --> P[planner] --> A{you approve}
-  A --> I[implementer per plan node, isolated] --> F{fence check}
+  G[goal] --> S[scouts] --> P[planner]
+  P --> I[implementer per plan node, isolated] --> F{fence check}
   F -- outside fence --> I
   F --> R[reviewer, other model]
   R -- fail, max 3 rounds --> I
@@ -37,7 +38,7 @@ flowchart LR
   C -- verified blockers --> I
 ```
 
-- **You approve the plan** before any code is written.
+- **No approval wait.** The plan is posted for you to read and the run keeps going; interrupt any time to change it. The planner only stops to ask when the goal leaves a real decision open.
 - **Fresh agents only.** A failed review sends the work to a new implementer that reads the findings, not the old conversation.
 - **Fence.** Every plan node lists the files it may touch. Changes outside it fail automatically, and reviewers fail unrequested extras too. Good ideas outside the fence land in `parking.md` for you.
 - **Council.** Three models review the branch blind. The chair checks every finding against the code; one verified blocker is enough, no voting.

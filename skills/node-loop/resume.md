@@ -28,7 +28,7 @@ Agents from the previous session are gone; every re-dispatch is a fresh agent wh
 |---|---|---|
 | scout | none, or `start` | `SKILL.md` step 3; keep existing `scout/*.md` files and dispatch only the missing areas |
 | plan | none, or `start` | step 4 from the dispatch |
-| plan | `done` or `revised` | step 4 approval gate: show `plan.md` again |
+| plan | `done` or `revised` | step 4: post `plan.md`, log `plan approved`, queue the plan nodes |
 | plan | `approved` | write any missing `queued` lines, then waves |
 | plan node | `queued` | step 5 in its wave |
 | plan node | `implement round=K agent=A` | if `omp/task/A` has commits beyond its merge-base with `RUN_BRANCH`, step 6 from item 2 with that branch; otherwise log `implement round=K agent=<new name>` and re-dispatch round K |

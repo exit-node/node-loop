@@ -50,7 +50,7 @@ The reviewer runs those commands; an item without a command is judged by reading
 
 ## Smells
 
-A plan node with any of these smells gets split, merged or rewritten before the plan is approved:
+A plan node with any of these smells gets split, merged or rewritten before the planner yields:
 
 - An acceptance item needs "and" more than twice: it is several plan nodes.
 - Its fence overlaps a plan node in the same wave: move the shared path into an earlier contract plan node or serialise the two.

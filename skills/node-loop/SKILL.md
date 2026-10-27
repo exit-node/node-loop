@@ -54,7 +54,7 @@ Run `scripts/ledger "$RUN" scout done` and close the `Scout` phase.
 
 Done when one `scout/*.md` file exists per scout and the ledger shows `scout done`.
 
-### 4. Plan and approval gate
+### 4. Plan
 
 Run `scripts/ledger "$RUN" plan start`.
 Dispatch `node-planner`, not isolated, with context `RUN_DIR`, `GOAL` (`$RUN/goal.md`), `SCOUTS` (`$RUN/scout`).
@@ -62,10 +62,10 @@ Dispatch `node-planner`, not isolated, with context `RUN_DIR`, `GOAL` (`$RUN/goa
 - **`needs-input`:** ask the user the `questions` verbatim, append their answers word for word to `goal.md` under `## Answers`, and dispatch a fresh planner with the same context.
 - **`planned`:** run `scripts/ledger "$RUN" plan done nodes=<count> waves=<count>`.
 
-Show the user the `plan.md` path and its plan node table, and ask for approval.
-This gate is hard: only the user's explicit approval opens it.
-On change requests, run `scripts/ledger "$RUN" plan revised -- <one-line summary>`, dispatch a fresh planner with the same context plus `PLAN_FEEDBACK=<the user's words verbatim>` in its task, and handle its result as above, so the revised plan logs `plan done` before you show it again.
-On approval, run `scripts/ledger "$RUN" plan approved`, then for every plan node `scripts/ledger "$RUN" <id> queued wave=<W> deps=<a,b or ->`, and append one `Wave W` phase per wave with items `<id>: queued`.
+Post the `plan.md` path and its plan node table to the user as information, then continue straight to step 5 without waiting for a reply.
+The user steers by interrupting; a run never pauses for plan approval.
+On a change request, run `scripts/ledger "$RUN" plan revised -- <one-line summary>`, dispatch a fresh planner with the same context plus `PLAN_FEEDBACK=<the user's words verbatim>` in its task, and handle its result as above; plan nodes already merged stay merged, and the rest are queued again from the revised plan.
+Once the plan is posted, run `scripts/ledger "$RUN" plan approved` (it marks the plan final for the ledger and forge, no user action involved), then for every plan node `scripts/ledger "$RUN" <id> queued wave=<W> deps=<a,b or ->`, and append one `Wave W` phase per wave with items `<id>: queued`.
 
 Done when the ledger shows `plan approved` and one `queued` line per plan node file in `nodes/`.
 

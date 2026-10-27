@@ -376,7 +376,7 @@ function applyState(s) {
       status = ps === "drafting" ? "pouring"
         : ps === "drafted" || ps === "revised" ? "review"
         : ps === "approved" ? "passed" : "queued";
-      text = { pouring: "drafting", review: "awaiting approval", passed: "approved", queued: "waiting" }[status];
+      text = { pouring: "drafting", review: "finalising", passed: "planned", queued: "waiting" }[status];
     } else {
       const n = s.nodes.find((m) => m.id === p.id.slice(3));
       status = n.status;
