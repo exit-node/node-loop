@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # preflight: verify the omp settings node-loop depends on before a run starts.
 #
-# Checks that every node-loop model role exists in `omp config get modelRoles`
-# and that task isolation is configured as branch mode without auto-apply.
-# omp silently falls back to the parent model when a role is missing, so a
-# missing role must stop the run here instead of degrading it later.
+# Checks that every node-loop model role exists in `omp config get modelRoles`, that each role value
+# names a model in `omp models --json` (the list omp resolves for this user), and that task isolation
+# is branch mode without auto-apply. A missing role makes omp fall back to the parent model, and an
+# unresolvable id fails mid-run, so both stop here.
 # modelRoles prints as one-line JSON; it is parsed with grep/sed to avoid a jq dependency.
 # Prints `ok` and exits 0, or prints each problem plus `Run: exitnode setup` and exits 1.
 set -euo pipefail
@@ -28,6 +28,13 @@ if ! command -v omp >/dev/null 2>&1; then
 fi
 
 if roles_json=$(omp config get modelRoles 2>/dev/null); then
+  # One catalog read; `omp models --json` lists the selectors `--model` accepts for this user.
+  if catalog=$(omp models --json 2>/dev/null); then
+    catalog_ok=1
+  else
+    catalog_ok=0
+    problem "could not list models (omp models --json failed)"
+  fi
   for role in $ROLES; do
     # Match `"role": "value"` with optional whitespace; the leading quote prevents suffix matches.
     value=$(printf '%s' "$roles_json" \
@@ -36,6 +43,14 @@ if roles_json=$(omp config get modelRoles 2>/dev/null); then
       | sed -e 's/^"[^"]*"[[:space:]]*:[[:space:]]*"//' -e 's/"$//' || true)
     if [ -z "$value" ]; then
       problem "model role missing: $role"
+    elif [ "$catalog_ok" -eq 1 ]; then
+      # A thinking suffix such as `:high` is part of the role value, not of the model id.
+      selector=$(printf '%s' "$value" | sed -E -e 's/:(off|minimal|low|medium|high|xhigh|max|auto)$//')
+      # Pattern match, not grep -q: closing the pipe early would trip pipefail on a large catalog.
+      case "$catalog" in
+        *"\"selector\":\"$selector\""*) ;;
+        *) problem "model role unresolved: $role = $value (omp lists no model $selector for this user)" ;;
+      esac
     fi
   done
 else
