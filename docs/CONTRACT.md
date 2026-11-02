@@ -55,8 +55,8 @@ Author defaults are this project's own picks; setup offers one only when omp res
 Required omp settings: `task.isolation.enabled: true`, `task.isolation.merge: branch`, `task.isolation.apply: false`.
 `apply: false` keeps each implementer's work on its `omp/task/<id>` branch; the orchestrator lands it only after review passes.
 
-Preflight (`scripts/preflight`) fails if any role above is missing from `omp config get modelRoles` or any isolation setting differs, and prints: `Run: exitnode setup`.
-Reason: omp silently falls back to the parent session's model when an agent's role is missing.
+Preflight (`scripts/preflight`) fails if any role above is missing from `omp config get modelRoles`, if a role's value (without a thinking suffix) is not a `selector` in `omp models --json`, or if any isolation setting differs, and prints the problem plus `Run: exitnode setup`.
+Reason: omp silently falls back to the parent session's model when an agent's role is missing, and an unresolvable id fails mid-run.
 
 ## Agents
 
