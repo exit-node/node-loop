@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# pre-dispatch: leave REPO clean before an isolated wave dispatch, and attribute any dirt honestly.
+#
+# Usage: pre-dispatch <run-dir> <wave>
+# Run once before every wave dispatch (SKILL.md step 5). Implementers run isolated and their writes are
+# caught per result by check-result, so dirt found here came from the scouts, the planner or the
+# orchestrator: those run in REPO without isolation. It is never blamed on an implementer.
+# Clean REPO (git status --porcelain empty): exit 0, silent.
+# Dirty REPO: stashes every change, untracked files included, as "node-loop-orchestrator-wave<W>",
+# writes `run dirty wave=<W> paths=<count> -- <paths>` to the ledger, prints the paths, exits 0.
+# Recover with `git -C "$REPO" stash list` and `git -C "$REPO" stash pop <ref>`.
+# Exit 2 on usage or input error, or when the stash fails.
+set -euo pipefail
+
+usage() {
+  printf 'pre-dispatch: %s\n' "$1" >&2
+  printf '%s\n' "usage: pre-dispatch <run-dir> <wave>" >&2
+  exit 2
+}
+
+[ "$#" -eq 2 ] || usage "expected 2 arguments"
+run_dir=$1
+wave=$2
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+[ -d "$run_dir" ] || usage "run dir not found: $run_dir"
+case "$wave" in
+  '' | *[!0-9]* | 0) usage "wave must be a positive integer: $wave" ;;
+esac
+
+run_dir=$(cd "$run_dir" && pwd)
+REPO=""
+# shellcheck disable=SC1091
+. "$run_dir/meta.env"
+[ -n "$REPO" ] || usage "REPO is empty in $run_dir/meta.env"
+[ -d "$REPO" ] || usage "REPO not found: $REPO"
+
+g() {
+  git -C "$REPO" -c core.quotePath=false "$@"
+}
+
+[ -n "$(g status --porcelain)" ] || exit 0
+
+# Tracked and untracked paths, de-duplicated; a staged rename contributes both sides.
+paths=$({
+  g diff --name-only --no-renames HEAD
+  g ls-files --others --exclude-standard
+} | sort -u)
+
+stash_msg="node-loop-orchestrator-wave$wave"
+g stash push --include-untracked -m "$stash_msg" >/dev/null ||
+  {
+    printf 'pre-dispatch: could not stash the dirt in %s; resolve it by hand\n' "$REPO" >&2
+    exit 2
+  }
+
+count=$(printf '%s\n' "$paths" | grep -c . || true)
+"$SCRIPT_DIR/ledger" "$run_dir" run dirty "wave=$wave" "paths=$count" -- \
+  "stashed as $stash_msg; written by the scouts, planner or orchestrator, not an implementer. $(printf '%s\n' "$paths" | paste -sd, -)"
+printf '%s\n' "$paths"

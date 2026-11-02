@@ -27,6 +27,7 @@ keys_for() {
   case "$1:$2" in
     run:start) echo "branch base" ;;
     run:done | run:blocked) echo "" ;;
+    run:dirty) echo "wave paths" ;;
     scout:start) echo "n" ;;
     scout:done) echo "" ;;
     plan:start | plan:approved | plan:revised) echo "" ;;
