@@ -13,10 +13,7 @@ Delete these comments when filling the template.
 
 ## Fence
 
-<!-- One "- " item per owned path, including files this plan node creates; syntax in node-spec "Fence syntax". -->
-- path/exact.ts            exact file
-- src/auth/                directory prefix: everything below
-- src/**/*.test.ts         bash pattern; * also matches /
+<!-- One "- " item per owned path, including files this plan node creates; syntax in node-spec "Fence syntax". Examples, not entries: examples: - path/exact.ts exact file; - src/auth/ directory prefix; - src/**/*.test.ts bash pattern. -->
 
 ## Out of scope
 
