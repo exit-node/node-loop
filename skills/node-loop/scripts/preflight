@@ -2,11 +2,12 @@
 # preflight: verify the omp settings node-loop depends on before a run starts.
 #
 # Checks that every node-loop model role exists in `omp config get modelRoles`, that each role value
-# names a model in `omp models --json` (the list omp resolves for this user), and that task isolation
-# is branch mode without auto-apply. A missing role makes omp fall back to the parent model, and an
-# unresolvable id fails mid-run, so both stop here.
+# names a model in `omp models --json` (the list omp resolves for this user), that task isolation
+# is branch mode without auto-apply, and that git can resolve a committer identity in the current repo.
+# A missing role makes omp fall back to the parent model, an unresolvable id fails mid-run, and a missing
+# identity makes every implementer commit fail, so all three stop here.
 # modelRoles prints as one-line JSON; it is parsed with grep/sed to avoid a jq dependency.
-# Prints `ok` and exits 0, or prints each problem plus `Run: exitnode setup` and exits 1.
+# Prints `ok` and exits 0, or prints each problem plus its fix and exits 1.
 set -euo pipefail
 
 # Roles every node-loop agent references via `model: "@<role>"`.
@@ -70,8 +71,24 @@ for pair in $ISOLATION; do
   fi
 done
 
+# Implementers commit in their own checkouts, so the repo must name its own identity. git auto-detects a
+# name from the account record when none is configured, so `git var` alone would pass a machine with no config.
+omp_problems=$problems
+git_problem=0
+git_name=$(git config --get user.name 2>/dev/null || true)
+git_email=$(git config --get user.email 2>/dev/null || true)
+if [ -z "$git_name" ] || [ -z "$git_email" ]; then
+  git_problem=1
+  problem "git identity missing in this repo (user.name='${git_name}', user.email='${git_email}')"
+fi
+
 if [ "$problems" -gt 0 ]; then
-  printf '%s\n' "Run: exitnode setup"
+  if [ "$omp_problems" -gt 0 ]; then
+    printf '%s\n' "Run: exitnode setup"
+  fi
+  if [ "$git_problem" -eq 1 ]; then
+    printf '%s\n' "Fix: set user.name and user.email in this repo (git config user.name '...' && git config user.email '...')"
+  fi
   exit 1
 fi
 
