@@ -51,6 +51,7 @@ in_fence() {
         ;;
       *[*?[]*)
         # Unquoted right side is a pattern; [[ ]] matching lets * cross /.
+        # shellcheck disable=SC2053 # intentional: the unquoted right side is the fence pattern
         [[ "$path" == $entry ]] && return 0
         ;;
       *)
