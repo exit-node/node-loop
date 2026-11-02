@@ -6,16 +6,19 @@
  * first a provider (or "Keep <current>" / the author default, which skip step two), then a model id
  * within that provider. Nothing is written until the confirm; cancelling any dialog writes nothing.
  *
- * Writes go through the settings registry handles (`lookup(id)` from `config/registry`):
+ * Only ids that `ctx.models.resolve` maps back to themselves are offered, so the picker never writes a
+ * role that `--model` rejects.
+ *
+ * Writes go through the settings registry handles (`lookup(id)` from `config/registry`, loaded lazily so a
+ * missing module only disables writing and never the `exitnode` keyword):
  * `modelRoles` is a record setting, so each role is written with `setEntry`, which touches only that
  * entry in the global `config.yml`; the isolation keys use `set`, which also targets the global layer.
  * When a handle or method is missing (older omp), or there is no UI, the exact config lines are
  * printed instead so the user can apply them by hand.
  */
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { lookup } from "@oh-my-pi/pi-coding-agent/config/registry";
 
-/** Roles in CONTRACT.md table order; `fallback` is the author's default, offered when it differs from the current value. */
+/** Roles in CONTRACT.md table order; `fallback` is the author's own pick, offered only when omp resolves it for this user. */
 export const ROLES = [
   { role: "node-plan", agent: "node-planner", fallback: "anthropic/claude-opus-5-5" },
   { role: "node-implement", agent: "node-implementer", fallback: "anthropic/claude-sonnet-5-5" },
@@ -43,6 +46,8 @@ interface SettingHandle {
   provenance?(scope: Scope): string;
 }
 
+type RegistryLookup = (id: string) => SettingHandle | undefined;
+
 // Picker label suffixes and prefixes; they are stripped back off through the label -> value map.
 const CURRENT_MARK = "  (current)";
 const KEEP_PREFIX = "Keep ";
@@ -52,10 +57,43 @@ const CANCELLED = "exitnode setup cancelled; nothing written.";
 const DATE_STAMP = /-\d{8}$/;
 const NATURAL = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
+/**
+ * Loads the settings registry at call time. The module is omp-internal, so it is imported dynamically on purpose:
+ * a static import that fails would stop the whole extension, keyword hook included. A failure returns undefined,
+ * and setup then prints the config lines instead.
+ */
+async function loadRegistry(): Promise<RegistryLookup | undefined> {
+  try {
+    const registry = (await import("@oh-my-pi/pi-coding-agent/config/registry")) as { lookup?: unknown };
+    return typeof registry.lookup === "function" ? (registry.lookup as RegistryLookup) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Splits `provider/id` at the first slash; OpenRouter ids keep their inner slash (`openrouter/anthropic/claude-...`). */
 function splitModel(value: string): { provider: string; id: string } {
   const slash = value.indexOf("/");
   return slash < 0 ? { provider: value, id: "" } : { provider: value.slice(0, slash), id: value.slice(slash + 1) };
+}
+
+/** The canonical `provider/id` that omp resolves `selector` to, or undefined when `--model` would reject it. */
+function resolveSelector(ctx: ExtensionContext, selector: string): string | undefined {
+  try {
+    const model = ctx.models.resolve(selector);
+    return model ? `${model.provider}/${model.id}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Models omp resolves for this user: a listed id that does not resolve to itself would fail at run time. */
+function availableModels(ctx: ExtensionContext): { provider: string; id: string }[] {
+  const listed: { provider: string; id: string }[] = ctx.models.list();
+  return listed.filter(({ provider, id }) => {
+    const selector = `${provider}/${id}`;
+    return resolveSelector(ctx, selector) === selector;
+  });
 }
 
 /** Provider -> model ids, undated ids only (a provider with nothing but dated ids keeps them), newest-looking first. */
@@ -82,6 +120,30 @@ function readRoles(value: unknown): Record<string, string> {
     if (typeof entry === "string" && entry.trim()) roles[key] = entry;
   }
   return roles;
+}
+
+/**
+ * Warnings for picks that still run but weaken review or the council. They are shown in the confirm and never block.
+ * Same-provider review is a real option for a one-provider user, so the warning names the fix instead of refusing.
+ */
+function setupWarnings(picks: Record<string, string>): string[] {
+  const warnings: string[] = [];
+  const implementer = splitModel(picks["node-implement"] ?? "").provider;
+  const reviewer = splitModel(picks["node-review"] ?? "").provider;
+  if (implementer && implementer === reviewer) {
+    warnings.push(
+      `node-review and node-implement both use ${reviewer}, so review is same-provider. Add a second provider for cross-provider review.`,
+    );
+  }
+  const seatsByModel = new Map<string, string[]>();
+  for (const role of ["council-seat-1", "council-seat-2", "council-seat-3"]) {
+    const model = picks[role];
+    if (model) seatsByModel.set(model, [...(seatsByModel.get(model) ?? []), role]);
+  }
+  for (const [model, seats] of seatsByModel) {
+    if (seats.length > 1) warnings.push(`${seats.join(" and ")} all use ${model}, so they share blind spots.`);
+  }
+  return warnings;
 }
 
 /** Exact lines for `~/.omp/agent/config.yml` and `omp config set`, used when writing is impossible. */
@@ -123,8 +185,10 @@ async function pickRole(
   const cur = current ? splitModel(current) : undefined;
 
   const first = new Map<string, { value: string } | { provider: string }>();
-  if (current) first.set(KEEP_PREFIX + current, { value: current });
-  if (spec.fallback !== current) first.set(FALLBACK_PREFIX + spec.fallback, { value: spec.fallback });
+  if (current && resolveSelector(ctx, current)) first.set(KEEP_PREFIX + current, { value: current });
+  if (spec.fallback !== current && resolveSelector(ctx, spec.fallback)) {
+    first.set(FALLBACK_PREFIX + spec.fallback, { value: spec.fallback });
+  }
   if (cur && providers.has(cur.provider)) first.set(cur.provider + CURRENT_MARK, { provider: cur.provider });
   for (const provider of providers.keys()) {
     if (provider !== cur?.provider) first.set(provider, { provider });
@@ -145,9 +209,10 @@ async function pickRole(
 
 export async function runSetup(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   const scope = pi.pi.settings;
-  const rolesHandle: SettingHandle | undefined = lookup("modelRoles");
+  const lookup = await loadRegistry();
+  const rolesHandle: SettingHandle | undefined = lookup?.("modelRoles");
   const isolation = ISOLATION.map(spec => {
-    const h: SettingHandle | undefined = lookup(spec.id);
+    const h: SettingHandle | undefined = lookup?.(spec.id);
     return { ...spec, handle: h, now: h?.get(scope) };
   });
   const current = readRoles(rolesHandle?.get(scope));
@@ -157,7 +222,12 @@ export async function runSetup(pi: ExtensionAPI, ctx: ExtensionContext): Promise
     return;
   }
 
-  const providers = groupModels(ctx.models.list());
+  const providers = groupModels(availableModels(ctx));
+  if (providers.size === 0) {
+    report(pi, ctx, "exitnode setup found no models you can use. Sign in to at least one provider in omp, then run exitnode setup again.", "warning");
+    return;
+  }
+
   const picks: Record<string, string> = {};
   for (const [index, spec] of ROLES.entries()) {
     const pick = await pickRole(ctx, index + 1, spec, current[spec.role], providers);
@@ -176,7 +246,10 @@ export async function runSetup(pi: ExtensionAPI, ctx: ExtensionContext): Promise
     return;
   }
 
+  const warnings = setupWarnings(picks);
   const summary = [
+    ...warnings.map(warning => `Warning: ${warning}`),
+    ...(warnings.length > 0 ? [""] : []),
     "Global config (~/.omp/agent/config.yml) will get:",
     "",
     ...ROLES.map(({ role }) => `${role}: ${picks[role]}${picks[role] === current[role] ? "  (unchanged)" : ""}`),
