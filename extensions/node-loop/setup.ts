@@ -2,12 +2,12 @@
  * `exitnode setup`: pick a model for every node-loop role and set the task isolation settings.
  *
  * Flow: one picker per role (CONTRACT.md "Model roles" order), one isolation item, one summary confirm.
- * Each role picker has two steps because `ctx.models.list()` holds hundreds of models (all of OpenRouter):
+ * Each role picker has two steps because the catalog holds hundreds of models (all of OpenRouter):
  * first a provider (or "Keep <current>" / the author default, which skip step two), then a model id
  * within that provider. Nothing is written until the confirm; cancelling any dialog writes nothing.
  *
- * Only ids that `ctx.models.resolve` maps back to themselves are offered, so the picker never writes a
- * role that `--model` rejects.
+ * Choices come from `omp models --json`, the catalog `--model` and the agents' roles resolve against.
+ * `ctx.models.list()` is not used: on a fresh omp cache it can list ids that never resolve at run time.
  *
  * Writes go through the settings registry handles (`lookup(id)` from `config/registry`, loaded lazily so a
  * missing module only disables writing and never the `exitnode` keyword):
@@ -18,7 +18,7 @@
  */
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
-/** Roles in CONTRACT.md table order; `fallback` is the author's own pick, offered only when omp resolves it for this user. */
+/** Roles in CONTRACT.md table order; `fallback` is the author's own pick, offered only when omp lists it for this user. */
 export const ROLES = [
   { role: "node-plan", agent: "node-planner", fallback: "anthropic/claude-opus-5-5" },
   { role: "node-implement", agent: "node-implementer", fallback: "anthropic/claude-sonnet-5-5" },
@@ -48,11 +48,15 @@ interface SettingHandle {
 
 type RegistryLookup = (id: string) => SettingHandle | undefined;
 
+type CatalogModel = { provider: string; id: string };
+
 // Picker label suffixes and prefixes; they are stripped back off through the label -> value map.
 const CURRENT_MARK = "  (current)";
 const KEEP_PREFIX = "Keep ";
 const FALLBACK_PREFIX = "Author default ";
 const CANCELLED = "exitnode setup cancelled; nothing written.";
+// Thinking level after a role value (`anthropic/claude-opus-5-5:high`); it is not part of the model id.
+const THINKING_SUFFIX = /:(off|minimal|low|medium|high|xhigh|max|auto)$/;
 // Dated snapshot ids (`claude-sonnet-4-20250514`) duplicate their undated alias; hide them to cut noise.
 const DATE_STAMP = /-\d{8}$/;
 const NATURAL = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -77,23 +81,16 @@ function splitModel(value: string): { provider: string; id: string } {
   return slash < 0 ? { provider: value, id: "" } : { provider: value.slice(0, slash), id: value.slice(slash + 1) };
 }
 
-/** The canonical `provider/id` that omp resolves `selector` to, or undefined when `--model` would reject it. */
-function resolveSelector(ctx: ExtensionContext, selector: string): string | undefined {
+/** The models `omp models --json` lists for this user, or undefined when that command cannot be read. */
+async function readCatalog(pi: ExtensionAPI): Promise<CatalogModel[] | undefined> {
   try {
-    const model = ctx.models.resolve(selector);
-    return model ? `${model.provider}/${model.id}` : undefined;
+    const result = await pi.exec("omp", ["models", "--json"]);
+    if (result.code !== 0) return undefined;
+    const parsed = JSON.parse(result.stdout) as { models?: CatalogModel[] };
+    return parsed.models;
   } catch {
     return undefined;
   }
-}
-
-/** Models omp resolves for this user: a listed id that does not resolve to itself would fail at run time. */
-function availableModels(ctx: ExtensionContext): { provider: string; id: string }[] {
-  const listed: { provider: string; id: string }[] = ctx.models.list();
-  return listed.filter(({ provider, id }) => {
-    const selector = `${provider}/${id}`;
-    return resolveSelector(ctx, selector) === selector;
-  });
 }
 
 /** Provider -> model ids, undated ids only (a provider with nothing but dated ids keeps them), newest-looking first. */
@@ -180,13 +177,14 @@ async function pickRole(
   spec: (typeof ROLES)[number],
   current: string | undefined,
   providers: Map<string, string[]>,
+  available: Set<string>,
 ): Promise<string | undefined> {
   const title = `exitnode setup ${step}/${ROLES.length + 1}: model for ${spec.role} (agent ${spec.agent})`;
   const cur = current ? splitModel(current) : undefined;
 
   const first = new Map<string, { value: string } | { provider: string }>();
-  if (current && resolveSelector(ctx, current)) first.set(KEEP_PREFIX + current, { value: current });
-  if (spec.fallback !== current && resolveSelector(ctx, spec.fallback)) {
+  if (current && available.has(current.replace(THINKING_SUFFIX, ""))) first.set(KEEP_PREFIX + current, { value: current });
+  if (spec.fallback !== current && available.has(spec.fallback)) {
     first.set(FALLBACK_PREFIX + spec.fallback, { value: spec.fallback });
   }
   if (cur && providers.has(cur.provider)) first.set(cur.provider + CURRENT_MARK, { provider: cur.provider });
@@ -222,15 +220,21 @@ export async function runSetup(pi: ExtensionAPI, ctx: ExtensionContext): Promise
     return;
   }
 
-  const providers = groupModels(availableModels(ctx));
-  if (providers.size === 0) {
+  const catalog = await readCatalog(pi);
+  if (!catalog) {
+    report(pi, ctx, "exitnode setup could not read `omp models --json`, so it cannot tell which models you can use. Run `omp models` to check, then run exitnode setup again.", "error");
+    return;
+  }
+  if (catalog.length === 0) {
     report(pi, ctx, "exitnode setup found no models you can use. Sign in to at least one provider in omp, then run exitnode setup again.", "warning");
     return;
   }
+  const available = new Set(catalog.map(({ provider, id }) => `${provider}/${id}`));
+  const providers = groupModels(catalog);
 
   const picks: Record<string, string> = {};
   for (const [index, spec] of ROLES.entries()) {
-    const pick = await pickRole(ctx, index + 1, spec, current[spec.role], providers);
+    const pick = await pickRole(ctx, index + 1, spec, current[spec.role], providers, available);
     if (pick === undefined) {
       ctx.ui.notify(CANCELLED, "info");
       return;
