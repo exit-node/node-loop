@@ -62,6 +62,7 @@ const TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const NODE_RE = /^[0-9]{2}-[a-z0-9-]+$/;
 const SEAT_RE = /^seat-([123])$/;
 // Plan node events from the grammar; anything else on a plan node subject is skipped.
+// Lookups use Object.hasOwn: a hand-edited `constructor` or `toString` event must not match Object.prototype.
 const NODE_EVENTS: Record<string, true> = {
   queued: true,
   implement: true,
@@ -204,7 +205,7 @@ function applyEvent(
     return true;
   }
 
-  if (!NODE_RE.test(subject) || !NODE_EVENTS[event]) return false;
+  if (!NODE_RE.test(subject) || !Object.hasOwn(NODE_EVENTS, event)) return false;
 
   const node = nodeFor(subject);
   // Events without a round key keep the node's current round.
