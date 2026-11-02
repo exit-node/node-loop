@@ -85,14 +85,21 @@ Done when every ready plan node of the wave has an `implement` ledger line and a
 
 Handle each result as it arrives; other plan nodes keep running.
 
-1. `status: blocked`: run `scripts/ledger "$RUN" <id> blocked round=<K> -- <first concern>`, show the user the concerns, and continue with plan nodes that do not depend on this one.
-2. Find the work: `BRANCH` and `BASE` are the result's `branchName` (`omp/task/<agent id>`) and `branchBaseSha`. When the result lacks them, use `git branch --list 'omp/task/*'` to find the agent's branch and `BASE=$(git merge-base "$RUN_BRANCH" "$BRANCH")`. Set `HEAD=$(git rev-parse "$BRANCH")`. A branch with no commits beyond `BASE` is shrink: run `scripts/ledger "$RUN" <id> fail round=<K> blockers=1 majors=0 -- empty diff` and kick back (step 8) without `PREV_PATCH`; the next implementer reads `REPORT`.
-3. Run `scripts/fence-check "$RUN/nodes/<id>.md" "$BASE" "$HEAD"`. On exit 1: run `scripts/ledger "$RUN" <id> fence round=<K> paths=<count> -- <comma-joined paths>`, run `scripts/review-package` as in item 4 only to capture the `.patch`, and kick back (step 8) with `FENCE_VIOLATIONS`. No reviewer sees a fence failure.
-4. Run `PACKAGE=$(scripts/review-package "$RUN" <id> <K> "$BASE" "$HEAD")` and `scripts/ledger "$RUN" <id> review round=<K>`.
-5. Dispatch `node-reviewer`, not isolated, `name: Rev<NN>r<K>`, with `RUN_DIR`, `BRIEF`, `NODE`, `REPORT`, `ROUND`, `PACKAGE`, `BASE`, `HEAD`. Save its JSON verbatim to `$RUN/reviews/<id>-r<K>.json`.
-6. The verdict is `fail` when any blocker or major exists or `scope.creep` or `scope.shrink` is non-empty, whatever the reviewer wrote. Pass goes to step 7. Fail: run `scripts/ledger "$RUN" <id> fail round=<K> blockers=<count> majors=<count> -- <top claim>` and go to step 8.
+1. **Leak check.** Run `scripts/leak-check "$RUN" <id> <K>` before anything else.
+   Exit 0: go to item 2.
+   Exit 2: show its message and stop, since REPO may need a human.
+   Exit 1: it printed the leaked paths and stashed them out of REPO (`git -C "$REPO" stash list` shows `node-loop-leak-<id>-r<K>`).
+   Run `scripts/ledger "$RUN" <id> fence round=<K> paths=<count> -- <comma-joined paths>`, find the work (item 3), run `scripts/review-package` as in item 5 only to capture the `.patch`, and kick back (step 8) with `FENCE_VIOLATIONS` set to the leaked paths.
+   No reviewer sees a leak.
+   The check runs per result, so a leak belongs to the plan node whose result triggered it.
+2. `status: blocked`: run `scripts/ledger "$RUN" <id> blocked round=<K> -- <first concern>`, show the user the concerns, and continue with plan nodes that do not depend on this one.
+3. Find the work: `BRANCH` and `BASE` are the result's `branchName` (`omp/task/<agent id>`) and `branchBaseSha`. When the result lacks them, use `git branch --list 'omp/task/*'` to find the agent's branch and `BASE=$(git merge-base "$RUN_BRANCH" "$BRANCH")`. Set `HEAD=$(git rev-parse "$BRANCH")`. A branch with no commits beyond `BASE` is shrink: run `scripts/ledger "$RUN" <id> fail round=<K> blockers=1 majors=0 -- empty diff` and kick back (step 8) without `PREV_PATCH`; the next implementer reads `REPORT`.
+4. Run `scripts/fence-check "$RUN/nodes/<id>.md" "$BASE" "$HEAD"`. On exit 1: run `scripts/ledger "$RUN" <id> fence round=<K> paths=<count> -- <comma-joined paths>`, run `scripts/review-package` as in item 5 only to capture the `.patch`, and kick back (step 8) with `FENCE_VIOLATIONS`. No reviewer sees a fence failure.
+5. Run `PACKAGE=$(scripts/review-package "$RUN" <id> <K> "$BASE" "$HEAD")` and `scripts/ledger "$RUN" <id> review round=<K>`.
+6. Dispatch `node-reviewer`, not isolated, `name: Rev<NN>r<K>`, with `RUN_DIR`, `BRIEF`, `NODE`, `REPORT`, `ROUND`, `PACKAGE`, `BASE`, `HEAD`. Save its JSON verbatim to `$RUN/reviews/<id>-r<K>.json`.
+7. The verdict is `fail` when any blocker or major exists or `scope.creep` or `scope.shrink` is non-empty, whatever the reviewer wrote. Pass goes to step 7. Fail: run `scripts/ledger "$RUN" <id> fail round=<K> blockers=<count> majors=<count> -- <top claim>` and go to step 8.
 
-Done when the plan node has a saved verdict and a `pass` or `fail` path chosen, or a `fence` or `blocked` ledger line.
+Done when the plan node has a saved verdict and a `pass` or `fail` path chosen, or a `fence` (leak or fence-check) or `blocked` ledger line.
 
 ### 7. Pass: land the work
 
@@ -111,9 +118,9 @@ After a `fail` or `fence` at round K:
 
 - K < 3: run `scripts/ledger "$RUN" <id> implement round=<K+1> agent=Impl<NN>r<K+1>` and dispatch a fresh `node-implementer` exactly as in step 5, one item, with `ROUND=<K+1>`, `PREV_PATCH=$RUN/reviews/<id>-r<K>.patch` and the findings key of the kickback, then continue at step 6:
   - review `fail`: `PREV_VERDICT=$RUN/reviews/<id>-r<K>.json`;
-  - `fence`: `FENCE_VIOLATIONS=<comma-joined paths>`;
+  - `fence` (fence-check or leak-check): `FENCE_VIOLATIONS=<comma-joined paths>`;
   - cherry-pick conflict: `CONFLICT_PATHS=<comma-joined paths>`;
-  - empty diff: no findings key and no `PREV_PATCH`.
+  - empty diff: no findings key and no `PREV_PATCH`; an empty branch after a leak uses `FENCE_VIOLATIONS` instead, with the leaked paths.
 - K = 3: round 4 never starts; go to step 9.
 
 Done when the plan node has a new `implement` line or has reached step 9.

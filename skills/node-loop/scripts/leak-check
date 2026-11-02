@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# leak-check: catch implementer writes that landed in the main checkout (REPO).
+#
+# Usage: leak-check <run-dir> <node-id> <round>
+# Reads REPO from <run-dir>/meta.env. The orchestrator runs it after every implementer result, before anything else.
+# Clean REPO (git status --porcelain empty): exit 0, prints nothing.
+# Dirty REPO: saves the tracked diff to reviews/<node-id>-r<round>-leak.patch, prints each leaked path once,
+# then stashes every change, untracked files included, as "node-loop-leak-<node-id>-r<round>".
+# Recover with `git -C "$REPO" stash list` and `git -C "$REPO" stash pop <ref>`. REPO is clean afterwards.
+# Exit 1 on a leak, 2 on usage or input errors.
+set -euo pipefail
+
+usage() {
+  printf 'leak-check: %s\n' "$1" >&2
+  printf '%s\n' "usage: leak-check <run-dir> <node-id> <round>" >&2
+  exit 2
+}
+
+[ "$#" -eq 3 ] || usage "expected 3 arguments"
+run_dir=$1
+node_id=$2
+round=$3
+
+NODE_RE='^[0-9]{2}-[a-z0-9-]+$'
+[ -d "$run_dir" ] || usage "run dir not found: $run_dir"
+[ -f "$run_dir/meta.env" ] || usage "no meta.env in $run_dir"
+[[ "$node_id" =~ $NODE_RE ]] || usage "invalid plan node id: $node_id"
+case "$round" in
+  '' | *[!0-9]* | 0) usage "round must be a positive integer: $round" ;;
+esac
+
+run_dir=$(cd "$run_dir" && pwd)
+REPO=""
+# shellcheck disable=SC1091
+. "$run_dir/meta.env"
+[ -n "$REPO" ] || usage "REPO is empty in $run_dir/meta.env"
+[ -d "$REPO" ] || usage "REPO not found: $REPO"
+
+g() {
+  git -C "$REPO" -c core.quotePath=false "$@"
+}
+
+[ -n "$(g status --porcelain)" ] || exit 0
+
+tag="$node_id-r$round"
+mkdir -p "$run_dir/reviews"
+g diff --no-color --no-ext-diff HEAD >"$run_dir/reviews/$tag-leak.patch"
+
+# Tracked and untracked paths, de-duplicated; a staged rename contributes both sides.
+{
+  g diff --name-only --no-renames HEAD
+  g ls-files --others --exclude-standard
+} | sort -u
+
+g stash push --include-untracked -m "node-loop-leak-$tag" >/dev/null ||
+  {
+    printf 'leak-check: could not stash the leak in %s; resolve it by hand\n' "$REPO" >&2
+    exit 2
+  }
+
+exit 1

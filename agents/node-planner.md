@@ -77,6 +77,11 @@ A fence is the plan node's whole territory; size it so the work fits inside and 
 Fences within one wave are disjoint (`node-spec` sizing rule 6); before yielding, compare every pair of fences in each wave.
 Wave 1 holds plan nodes with no deps; each later wave holds plan nodes whose deps all sit in earlier waves.
 
+## Commands and paths
+
+Acceptance commands, brief commands and every path in a plan node are repo-relative and run from the repo root of the implementer's own checkout.
+Never write an absolute path, never `cd` into any checkout, and never write the main checkout's path: the implementer runs in its own checkout, and a hard-coded path sends its edits to the main checkout.
+
 ## Questions
 
 When the goal leaves a decision open that changes the plan (behaviour, public interface, data shape, which of two readings the user meant), ask instead of guessing.
@@ -92,6 +97,7 @@ The plan covers the goal and only the goal.
 - every requirement in `goal.md` maps to at least one plan node acceptance item;
 - every plan node passes the `node-spec` sizing rules and smell list;
 - fences within each wave are disjoint;
+- every acceptance command, brief command and path is repo-relative, with no absolute path and no `cd`;
 - `brief.md` is at most 150 lines and every command in it is confirmed.
 
 Call `yield` alone in its own turn, after every file write has returned; a `yield` sent alongside other tool calls ends the session and aborts them.

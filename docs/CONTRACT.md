@@ -8,7 +8,7 @@ Every skill, agent, script and the extension follows this file; change it here f
 - **node**: one unit of planned work. The smallest change one fresh agent can implement and one reviewer can pass or fail from the diff alone. Always written "plan node" or `nodes/NN-slug.md` in prose, never bare "node", so agents never read it as Node.js.
 - **fence**: a node's owned paths plus its out-of-scope list. Leading word in every prompt.
 - **creep**: a change the node did not ask for. **shrink**: a stub, TODO, weakened or skipped test, or unmet acceptance item.
-- **kickback**: a failed review; the orchestrator dispatches a new, fresh implementer.
+- **kickback**: a failed review, fence check or leak check; the orchestrator dispatches a new, fresh implementer.
 - **wave**: the set of plan nodes whose dependencies have all passed; they run in parallel.
 - **run dir**: per-run state folder, outside the repo.
 - **orchestrator**: the main omp session running the `node-loop` skill.
@@ -20,7 +20,7 @@ package.json                     name "node-loop"; omp.extensions -> ["extension
 .omp-plugin/marketplace.json     catalog for /marketplace add exit-node/node-loop
 skills/node-loop/SKILL.md        orchestrator procedure
 skills/node-loop/resume.md       resume procedure, read when the user says resume
-skills/node-loop/scripts/        preflight, run-init, ledger, fence-check, review-package (bash + git only)
+skills/node-loop/scripts/        preflight, run-init, ledger, fence-check, leak-check, review-package (bash + git only)
 skills/node-spec/SKILL.md        what a plan node is, sizing rules, smells
 skills/node-spec/template.md     plan node file template
 skills/node-council/SKILL.md     chair procedure: dispatch seats, verify findings
@@ -70,6 +70,9 @@ Every agent writes prose to files in the run dir and yields only the JSON below.
 | node-reviewer | read, grep, glob, bash, write | node-spec | "" |
 | council-chair | read, grep, glob, bash, write, task | node-council | council-seat-1, council-seat-2, council-seat-3 |
 | council-seat-N | read, grep, glob, bash, write | (none) | "" |
+
+Isolation: an implementer works only in its own checkout (its working directory) and translates any absolute path in its plan node to that checkout.
+The reviewer runs acceptance commands only in a throwaway worktree, never in its starting directory, which is the main checkout.
 
 ### Output schemas
 
@@ -130,6 +133,7 @@ council-chair:
 | `reports/NN-slug.md` (append-only, `## Round K`) | implementer | reviewer, next implementer |
 | `reviews/NN-slug-rK.md` (review package: log, stat, diff -U10) | review-package | reviewer |
 | `reviews/NN-slug-rK.patch` (plain diff base..branch) | review-package | next implementer on kickback |
+| `reviews/NN-slug-rK-leak.patch` (tracked diff of a leak into REPO, when one happens; the leaked changes are stashed as `node-loop-leak-NN-slug-rK`) | leak-check | user, orchestrator |
 | `reviews/NN-slug-rK.json` | orchestrator (reviewer verdict) | orchestrator |
 | `council/seat-N.json`, `council/verdict.md` | chair | orchestrator, user |
 | `parking.md` (append-only: out-of-fence ideas) | any agent | user at the end |
@@ -160,6 +164,8 @@ NN-slug, NN-slug | none
 
 `fence-check` reads only the list items under `## Fence` (first token of each `- ` line).
 
+Acceptance commands and every path are repo-relative and run from the root of the implementer's checkout: no absolute path, no `cd`.
+
 ## Ledger grammar (`ledger.md`)
 
 One event per line, written only by `scripts/ledger`:
@@ -181,6 +187,8 @@ One event per line, written only by `scripts/ledger`:
 | seat-N | `start`, `done` (findings) |
 
 `round` starts at 1. A `fail`/`fence` event is a kickback; the next `implement` carries `round+1`. Cap: round 4 never starts; after round-3 `fail` the orchestrator writes `ruled` or `blocked`.
+
+A `fence` also covers a leak into REPO found by `leak-check`; its paths are the leaked ones.
 
 Example:
 ```
@@ -205,6 +213,7 @@ Example:
 | `ledger` | `ledger <run-dir> <subject> <event> [k=v...] [-- text]` | validates subject/event/keys against the grammar; appends; exit 2 on invalid |
 | `fence-check` | `fence-check <node-file> <base> <head>` | prints each changed path outside the fence; exit 1 if any, 0 if clean |
 | `review-package` | `review-package <run-dir> <node-id> <round> <base> <head>` | writes `reviews/<id>-r<round>.md` and `.patch`; prints the `.md` path |
+| `leak-check` | `leak-check <run-dir> <node-id> <round>` | REPO clean: exit 0, silent; leak: writes `reviews/<id>-r<round>-leak.patch`, prints the leaked paths, stashes them as `node-loop-leak-<id>-r<round>`; exit 1 on leak, 2 on usage or input error |
 
 ## Orchestrator flow (owned by `skills/node-loop`)
 
@@ -213,9 +222,9 @@ Example:
 3. Scouts (bundled `scout`, parallel, read-only) write `scout/*.md`.
 4. `node-planner` writes `brief.md`, `plan.md`, `nodes/*.md`. The orchestrator posts the plan to the user as information and continues without waiting; ledger `plan approved` marks it final. Planner `needs-input` questions still wait for answers.
 5. Per wave: dispatch one `node-implementer` per ready plan node, `isolated: true`, all in one `task` call. Context field: run dir, node path, brief path, report path, dep contract sections, and on round > 1 the previous `.patch` and review paths.
-6. On each result: `fence-check` on `branchBaseSha..branchName` (fail = automatic kickback, no reviewer); else `review-package` then `node-reviewer` (not isolated, reads package + node + report).
+6. On each result: `leak-check` first (exit 1: a leak into REPO, stashed and recorded as `fence`, kicked back with `FENCE_VIOLATIONS`, no reviewer); then `fence-check` on `branchBaseSha..branchName` (fail = automatic kickback, no reviewer); else `review-package` then `node-reviewer` (not isolated, reads package + node + report).
 7. Pass: cherry-pick the branch commits onto `RUN_BRANCH`, append Exposes to `contracts.md`, ledger `merged`. Cherry-pick conflict = kickback on the new base with `CONFLICT_PATHS`.
-8. Fail: new fresh `node-implementer` (never revive the old agent), round+1, max 3 rounds. It gets exactly one findings key: `PREV_VERDICT` (review fail), `FENCE_VIOLATIONS` (fence), `CONFLICT_PATHS` (cherry-pick conflict), or none for an empty diff; plus `PREV_PATCH` when a diff exists. Nits never kick back; they go to `report.md`.
+8. Fail: new fresh `node-implementer` (never revive the old agent), round+1, max 3 rounds. It gets exactly one findings key: `PREV_VERDICT` (review fail), `FENCE_VIOLATIONS` (fence or leak), `CONFLICT_PATHS` (cherry-pick conflict), or none for an empty diff; plus `PREV_PATCH` when a diff exists. Nits never kick back; they go to `report.md`.
 9. After round 3 fails: each open finding gets a ruling in `rulings.md` (reviewer wrong, or real but nothing depends on it) or the run stops and asks the user (real and a later node depends on it). No silent drops.
 10. All plan nodes merged: `council-chair` (not isolated) reviews `BASE_SHA..RUN_BRANCH`. `verdict: fix` → its fix nodes enter the loop as a new wave; second council run after fixes, then stop.
 11. Write `report.md` (merged nodes, rulings, nits, parking, council result); ledger `run done`.

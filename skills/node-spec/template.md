@@ -33,6 +33,7 @@ Exposes: none
 ## Acceptance
 
 <!-- One checkable statement per item with the exact command that proves it; see node-spec "Acceptance". -->
+<!-- Commands run from the repo root of the implementer's checkout: repo-relative only, no absolute paths, no `cd`. -->
 - [ ] checkable statement - `exact command proving it`
 
 ## Depends on

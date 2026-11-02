@@ -88,9 +88,11 @@ When that evidence is missing, trimmed past the result, or doubtful, re-run the 
 
 ```
 wt=$(mktemp -d) && git worktree add --detach "$wt" <HEAD>
-# run the command inside "$wt"
+# run each command as (cd "$wt" && <command>); any absolute path in it is translated to "$wt"
 git worktree remove --force "$wt"
 ```
+
+Your working directory is the main checkout: run acceptance commands only inside `$wt`, never there, and never `cd` into the main checkout.
 
 An acceptance item you could not confirm is shrink.
 

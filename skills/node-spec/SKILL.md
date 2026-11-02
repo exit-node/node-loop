@@ -17,10 +17,10 @@ Always say "plan node" or `nodes/NN-slug.md`, never bare "node", so nobody reads
 
 ## Terms
 
-- **fence**: the paths a plan node owns (`## Fence`) plus its `## Out of scope` list. The implementer changes only fenced paths; `scripts/fence-check` lists every changed path outside it.
+- **fence**: the paths a plan node owns (`## Fence`) plus its `## Out of scope` list. The implementer changes only fenced paths; `scripts/fence-check` lists every changed path outside it, and `scripts/leak-check` catches any write that reached the main checkout.
 - **creep**: a change the plan node did not ask for, inside or outside the fence. Ideas that occur along the way go to `parking.md`.
 - **shrink**: a stub, a TODO, a weakened or skipped test, or an unmet acceptance item.
-- **kickback**: a failed review, fence check or cherry-pick; a new, fresh implementer continues the plan node from the previous `.patch`.
+- **kickback**: a failed review, fence check, leak check or cherry-pick; a new, fresh implementer continues the plan node from the previous `.patch`.
 - **wave**: the set of plan nodes whose dependencies have all merged; they run in parallel.
 
 ## Fence syntax
@@ -47,6 +47,8 @@ Generated files the change produces (lockfiles, snapshots, migrations) belong in
 
 Each `## Acceptance` item is one checkable statement plus the exact command that proves it, as in the template.
 The reviewer runs those commands; an item without a command is judged by reading the diff, so reserve that for statements a diff answers directly ("no new public export in `src/index.ts`").
+Commands run from the root of the implementer's own checkout, so write them repo-relative (`python3 -m unittest test_todo.py`, never `cd /abs/path && ...`).
+Fence paths are repo-relative too; no absolute path appears anywhere in a plan node.
 
 ## Smells
 
@@ -57,3 +59,4 @@ A plan node with any of these smells gets split, merged or rewritten before the 
 - An acceptance item cannot be checked ("works well", "is clean", "handles errors properly"): rewrite it as an observable outcome with a command.
 - It only makes sense together with another plan node (neither can merge alone and stay green): merge them, or cut a contract plan node both depend on.
 - Its `Consumes:` names an interface no dependency `Exposes:`: add the dependency or the missing contract plan node.
+- An acceptance command or path is absolute or starts with `cd`: rewrite it relative to the repo root, since the implementer runs in its own checkout.

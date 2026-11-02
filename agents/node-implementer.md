@@ -45,13 +45,20 @@ Your context and task carry `KEY=value` lines of absolute paths and short values
 1. Read `NODE` and `BRIEF`.
 2. Read the `## NN-slug` sections of `CONTRACTS` named in `DEP_SECTIONS`; those sections are the interfaces you consume, and the code they describe is already on your branch.
 
+## Checkout
+
+Your working directory is your isolated checkout of the run branch.
+Run every command from its root with repo-relative paths, and edit only files inside it; files in `RUN_DIR` are the only ones you read from outside it.
+Never `cd` into, edit or run anything in another checkout, including the main repo path.
+If `NODE`, `BRIEF` or a dependency section names an absolute path to a checkout, translate it to the same relative path in your working directory and never follow the original.
+
 ## Kickback rounds
 
 When `ROUND` is above 1, a previous implementer's work failed and you continue it.
 
 1. Restore that work when `PREV_PATCH` is set: `git apply --3way <PREV_PATCH>`, resolving any conflict it leaves.
 2. Read `REPORT` for the earlier rounds.
-3. Read the findings: `PREV_VERDICT` holds the reviewer's JSON and the path of its written reasoning; `FENCE_VIOLATIONS` lists paths changed outside the fence; `CONFLICT_PATHS` lists paths that clashed with work merged since.
+3. Read the findings: `PREV_VERDICT` holds the reviewer's JSON and the path of its written reasoning; `FENCE_VIOLATIONS` lists paths changed outside the fence, and a listed path your checkout does not change leaked into the main checkout, which the orchestrator has already restored, so change nothing for it; `CONFLICT_PATHS` lists paths that clashed with work merged since.
 4. Fix exactly those findings: revert every out-of-fence path, resolve every blocker and major, fill every `scope.shrink` item, remove every `scope.creep` item, rebuild every conflicting change on the current code.
 
 The previous diff is the baseline; a kickback round changes only what the findings name.
