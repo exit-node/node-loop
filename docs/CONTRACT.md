@@ -19,6 +19,7 @@ Every skill, agent, script and the extension follows this file; change it here f
 package.json                     name "node-loop"; omp.extensions -> ["extensions/node-loop/index.ts"]
 .omp-plugin/marketplace.json     catalog for /marketplace add exit-node/node-loop
 skills/node-loop/SKILL.md        orchestrator procedure
+skills/node-loop/resume.md       resume procedure, read when the user says resume
 skills/node-loop/scripts/        preflight, run-init, ledger, fence-check, review-package (bash + git only)
 skills/node-spec/SKILL.md        what a plan node is, sizing rules, smells
 skills/node-spec/template.md     plan node file template
@@ -173,7 +174,7 @@ One event per line, written only by `scripts/ledger`:
 | run | `start` (branch, base), `done`, `blocked` |
 | scout | `start` (n), `done` |
 | plan | `start`, `done` (nodes, waves), `approved`, `revised` |
-| plan node | `queued` (wave, deps=a,b or deps=-), `implement` (round, agent), `review` (round), `fence` (round, paths), `fail` (round, blockers, majors), `pass` (round), `merged` (commits=a1b2c3d..d4e5f6a), `ruled` (round, findings), `blocked` (round) |
+| plan node | `queued` (wave, deps=a,b or deps=-), `implement` (round, agent), `review` (round), `fence` (round, paths=<count>, text=<comma-joined paths>), `fail` (round, blockers, majors), `pass` (round), `merged` (commits=a1b2c3d..d4e5f6a), `ruled` (round, findings), `blocked` (round) |
 | council | `start`, `verify`, `done` (verdict=clean\|fix, blockers) |
 | seat-N | `start`, `done` (findings) |
 
