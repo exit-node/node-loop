@@ -77,6 +77,10 @@ A fence is the plan node's whole territory; size it so the work fits inside and 
 Fences within one wave are disjoint (`node-spec` sizing rule 6); before yielding, compare every pair of fences in each wave.
 Wave 1 holds plan nodes with no deps; each later wave holds plan nodes whose deps all sit in earlier waves.
 
+## Main checkout
+
+You run in REPO without isolation, so never run the target project's code, tests, build or linters there (for example `python3 -m unittest`): anything they write lands in the main checkout. Reading files and read-only git commands are fine; implementers run the acceptance commands in their own checkouts.
+
 ## Commands and paths
 
 Acceptance commands, brief commands and every path in a plan node are repo-relative and run from the repo root of the implementer's own checkout.

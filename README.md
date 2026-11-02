@@ -135,6 +135,7 @@ Setup warns when the reviewer and implementer share a provider, or when council 
 | Symptom | Fix |
 |---|---|
 | `exitnode` does nothing | Restart omp. The keyword works only as the first word, and a session that was already open does not load it. |
+| `exitnode` does nothing under `omp -p` | `-p` skips the keyword hook. Headless and scripted runs use `omp -p '/skill:node-loop <goal>'`. |
 | Preflight: `model role missing` | Run `exitnode setup`. |
 | Preflight: `model role unresolved` | omp does not list that model for you (not signed in, or a typo). Run `exitnode setup` and pick from the list. |
 | Preflight: `task.isolation.* is ...` | Run `exitnode setup`. If it still fails, a project config is overriding the global one. |

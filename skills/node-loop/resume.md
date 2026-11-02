@@ -31,7 +31,7 @@ Agents from the previous session are gone; every re-dispatch is a fresh agent wh
 | plan | `done` or `revised` | step 4: post `plan.md`, log `plan approved`, queue the plan nodes |
 | plan | `approved` | write any missing `queued` lines, then waves |
 | plan node | `queued` | step 5 in its wave |
-| plan node | `implement round=K agent=A` | if `omp/task/A` has commits beyond its merge-base with `RUN_BRANCH`, step 6 from item 2 with that branch; otherwise log `implement round=K agent=<new name>` and re-dispatch round K |
+| plan node | `implement round=K agent=A` | if `omp/task/A` has commits beyond its merge-base with `RUN_BRANCH`, step 6 from item 1 with that branch (the gates in item 2 run again); otherwise log `implement round=K agent=<new name>` and re-dispatch round K |
 | plan node | `review round=K` | `BASE` and `HEAD` come from the `- Range:` line of `reviews/<id>-rK.md` (`grep -m1`); if `reviews/<id>-rK.json` exists, step 6 item 6 with it, otherwise step 6 item 5 on the existing package |
 | plan node | `pass` or `ruled` | `git log --format=%s "$BASE_SHA..$RUN_BRANCH"` has no line starting `<id>: `: run step 7 from item 2; otherwise finish the missing step 7 items 4 and 5 |
 | plan node | `fail` or `fence` | step 8, findings key from the ledger line: `fence` text → `FENCE_VIOLATIONS`; `fail` text `cherry-pick conflict: <paths>` → `CONFLICT_PATHS`; `fail` text `empty diff` → none; any other `fail` → `PREV_VERDICT` |

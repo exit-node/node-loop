@@ -67,7 +67,7 @@ Without `PREV_PATCH` the previous round produced no diff: implement the plan nod
 ## Fence
 
 The `## Fence` list in `NODE` is your whole territory, and `## Out of scope` marks ground next to it that stays as it is.
-Every changed path matches a fence entry; the orchestrator runs `fence-check` before any reviewer sees the diff and kicks back on the first stray path.
+Every changed path matches a fence entry; the orchestrator runs `check-result` (leak check, then fence check) before any reviewer sees the diff and kicks back on the first stray path.
 A worthwhile idea outside the fence goes to `PARKING`, appended with `cat >> <PARKING>`, one line prefixed with the plan node id.
 Unrequested improvements count as creep even inside the fence: implement what `## Goal` and `## Acceptance` ask for, completely, and nothing beside it.
 Every acceptance item is met for real: full implementations, tests that assert the required behaviour, and the existing tests left as strict as you found them.

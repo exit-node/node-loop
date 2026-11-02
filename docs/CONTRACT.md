@@ -20,7 +20,7 @@ package.json                     name "node-loop"; omp.extensions -> ["extension
 .omp-plugin/marketplace.json     catalog for /marketplace add exit-node/node-loop
 skills/node-loop/SKILL.md        orchestrator procedure
 skills/node-loop/resume.md       resume procedure, read when the user says resume
-skills/node-loop/scripts/        preflight, run-init, ledger, fence-check, leak-check, review-package (bash + git only)
+skills/node-loop/scripts/        preflight, run-init, ledger, check-result (fence-check + leak-check), pre-dispatch, review-package (bash + git only)
 skills/node-spec/SKILL.md        what a plan node is, sizing rules, smells
 skills/node-spec/template.md     plan node file template
 skills/node-council/SKILL.md     chair procedure: dispatch seats, verify findings
@@ -180,7 +180,7 @@ One event per line, written only by `scripts/ledger`:
 
 | Subject | Events (keys) |
 |---|---|
-| run | `start` (branch, base), `done`, `blocked` |
+| run | `start` (branch, base), `done`, `blocked`, `dirty` (wave, paths=<count>; text names the stash, written by scouts, planner or orchestrator) |
 | scout | `start` (n), `done` |
 | plan | `start`, `done` (nodes, waves), `approved`, `revised` |
 | plan node | `queued` (wave, deps=a,b or deps=-), `implement` (round, agent), `review` (round), `fence` (round, paths=<count>, text=<comma-joined paths>), `fail` (round, blockers, majors), `pass` (round), `merged` (commits=a1b2c3d..d4e5f6a), `ruled` (round, findings), `blocked` (round) |
@@ -189,7 +189,7 @@ One event per line, written only by `scripts/ledger`:
 
 `round` starts at 1. A `fail`/`fence` event is a kickback; the next `implement` carries `round+1`. Cap: round 4 never starts; after round-3 `fail` the orchestrator writes `ruled` or `blocked`.
 
-A `fence` also covers a leak into REPO found by `leak-check`; its paths are the leaked ones.
+A `fence` also covers a leak into REPO found by `check-result`'s leak check; its paths are the leaked ones.
 
 Example:
 ```
@@ -215,6 +215,8 @@ Example:
 | `fence-check` | `fence-check <node-file> <base> <head>` | prints each changed path outside the fence; exit 1 if any, 0 if clean |
 | `review-package` | `review-package <run-dir> <node-id> <round> <base> <head>` | writes `reviews/<id>-r<round>.md` and `.patch`; prints the `.md` path |
 | `leak-check` | `leak-check <run-dir> <node-id> <round>` | REPO clean: exit 0, silent; leak: writes `reviews/<id>-r<round>-leak.patch`, prints the leaked paths, stashes them as `node-loop-leak-<id>-r<round>`; exit 1 on leak, 2 on usage or input error |
+| `check-result` | `check-result <run-dir> <node-id> <round> <base> <head>` | runs `leak-check`, then `fence-check` on `base..head`; on a violation writes the `fence` ledger line, captures `reviews/<id>-r<round>.patch`, prints the paths; exit 0 clean, 1 violation (kick back), 2 usage or input error or stash failure |
+| `pre-dispatch` | `pre-dispatch <run-dir> <wave>` | REPO clean: exit 0, silent; dirty: stashes everything as `node-loop-orchestrator-wave<W>`, writes `run dirty wave=<W> paths=<count>`, prints the paths, exit 0; exit 2 on usage or failed stash |
 
 ## Orchestrator flow (owned by `skills/node-loop`)
 
@@ -222,8 +224,8 @@ Example:
 2. `run-init`; resume instead when the user says resume: rebuild `todo` from `ledger.md`.
 3. Scouts (bundled `scout`, parallel, read-only) write `scout/*.md`.
 4. `node-planner` writes `brief.md`, `plan.md`, `nodes/*.md`. The orchestrator posts the plan to the user as information and continues without waiting; ledger `plan approved` marks it final. Planner `needs-input` questions still wait for answers.
-5. Per wave: dispatch one `node-implementer` per ready plan node, `isolated: true`, all in one `task` call. Context field: run dir, node path, brief path, report path, dep contract sections, and on round > 1 the previous `.patch` and review paths.
-6. On each result: `leak-check` first (exit 1: a leak into REPO, stashed and recorded as `fence`, kicked back with `FENCE_VIOLATIONS`, no reviewer); then `fence-check` on `branchBaseSha..branchName` (fail = automatic kickback, no reviewer); else `review-package` then `node-reviewer` (not isolated, reads package + node + report).
+5. Before each wave: `pre-dispatch` leaves REPO clean; any dirt is stashed as `node-loop-orchestrator-wave<W>` and recorded as `run dirty`, attributed to the scouts, planner or orchestrator. Per wave: dispatch one `node-implementer` per ready plan node, `isolated: true`, all in one `task` call. Context field: run dir, node path, brief path, report path, dep contract sections, and on round > 1 the previous `.patch` and review paths.
+6. On each result: `scripts/check-result` (blocked results included), which runs `leak-check` first (exit 1: a leak into REPO, stashed as `node-loop-leak-<id>-r<K>` and recorded as `fence`) and then `fence-check` on `branchBaseSha..branchName`; exit 1 on either is an automatic kickback with `FENCE_VIOLATIONS`, no reviewer; exit 2 stops the run for a human; else `review-package` then `node-reviewer` (not isolated, reads package + node + report).
 7. Pass: cherry-pick the branch commits onto `RUN_BRANCH`, append Exposes to `contracts.md`, ledger `merged`. Cherry-pick conflict = kickback on the new base with `CONFLICT_PATHS`.
 8. Fail: new fresh `node-implementer` (never revive the old agent), round+1, max 3 rounds. It gets exactly one findings key: `PREV_VERDICT` (review fail), `FENCE_VIOLATIONS` (fence or leak), `CONFLICT_PATHS` (cherry-pick conflict), or none for an empty diff; plus `PREV_PATCH` when a diff exists. Nits never kick back; they go to `report.md`.
 9. After round 3 fails: each open finding gets a ruling in `rulings.md` (reviewer wrong, or real but nothing depends on it) or the run stops and asks the user (real and a later node depends on it). No silent drops.
@@ -234,7 +236,7 @@ Progress: the orchestrator mirrors the ledger into the omp `todo` list (phases S
 
 ## Extension (`extensions/node-loop/`)
 
-- `input` hook, interactive source only: if trimmed text's first word is exactly `exitnode`:
+- `input` hook, interactive and RPC sources (`omp -p` print mode fires no input hook, so headless and scripted runs use `/skill:node-loop <goal>`): if trimmed text's first word is exactly `exitnode`:
   - `exitnode setup` → run setup, `handled: true`
   - `exitnode view` → start forge, open browser, `handled: true`
   - `exitnode` or `exitnode <rest>` → return `{ text: "/skill:node-loop <rest>" }`

@@ -17,7 +17,7 @@ Always say "plan node" or `nodes/NN-slug.md`, never bare "node", so nobody reads
 
 ## Terms
 
-- **fence**: the paths a plan node owns (`## Fence`) plus its `## Out of scope` list. The implementer changes only fenced paths; `scripts/fence-check` lists every changed path outside it, and `scripts/leak-check` catches any write that reached the main checkout.
+- **fence**: the paths a plan node owns (`## Fence`) plus its `## Out of scope` list. The implementer changes only fenced paths; `scripts/check-result` lists every changed path outside it and catches any write that reached the main checkout.
 - **creep**: a change the plan node did not ask for, inside or outside the fence. Ideas that occur along the way go to `parking.md`.
 - **shrink**: a stub, a TODO, a weakened or skipped test, or an unmet acceptance item.
 - **kickback**: a failed review, fence check, leak check or cherry-pick; a new, fresh implementer continues the plan node from the previous `.patch`.
