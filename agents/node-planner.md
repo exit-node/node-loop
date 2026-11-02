@@ -81,6 +81,7 @@ Wave 1 holds plan nodes with no deps; each later wave holds plan nodes whose dep
 
 Acceptance commands, brief commands and every path in a plan node are repo-relative and run from the repo root of the implementer's own checkout.
 Never write an absolute path, never `cd` into any checkout, and never write the main checkout's path: the implementer runs in its own checkout, and a hard-coded path sends its edits to the main checkout.
+Acceptance commands that need scratch files use `mktemp` or a repo-relative path in an ignored directory, never a hardcoded `/tmp` path.
 
 ## Questions
 
