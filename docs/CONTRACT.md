@@ -56,7 +56,8 @@ Required omp settings: `task.isolation.enabled: true`, `task.isolation.merge: br
 `apply: false` keeps each implementer's work on its `omp/task/<id>` branch; the orchestrator lands it only after review passes.
 
 Preflight (`scripts/preflight`) fails if any role above is missing from `omp config get modelRoles`, if a role's value (without a thinking suffix) is not a `selector` in `omp models --json`, or if any isolation setting differs, and prints the problem plus `Run: exitnode setup`.
-Reason: omp silently falls back to the parent session's model when an agent's role is missing, and an unresolvable id fails mid-run.
+Preflight also fails if the current repo has no `user.name` or no `user.email` (`git config --get`), and prints the fix `git config user.name` / `git config user.email`.
+Reason: omp silently falls back to the parent session's model when an agent's role is missing, an unresolvable id fails mid-run, and a repo with no identity makes every implementer commit fail mid-run.
 
 ## Agents
 

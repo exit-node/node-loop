@@ -138,6 +138,7 @@ Setup warns when the reviewer and implementer share a provider, or when council 
 | Preflight: `model role missing` | Run `exitnode setup`. |
 | Preflight: `model role unresolved` | omp does not list that model for you (not signed in, or a typo). Run `exitnode setup` and pick from the list. |
 | Preflight: `task.isolation.* is ...` | Run `exitnode setup`. If it still fails, a project config is overriding the global one. |
+| Preflight: `git identity missing` | The target repo has no `user.name` or `user.email`. Run `git config user.name '<name>'` and `git config user.email '<email>'` in that repo. |
 | Run refuses: dirty working tree | Commit or stash, including untracked files. |
 | Run refuses: detached HEAD | `git switch <branch>` first. |
 | Forge says no free port | Ports 4747 to 4767 are all taken. Close the other forge. |
