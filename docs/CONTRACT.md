@@ -229,7 +229,7 @@ Progress: the orchestrator mirrors the ledger into the omp `todo` list (phases S
   - `exitnode view` → start forge, open browser, `handled: true`
   - `exitnode` or `exitnode <rest>` → return `{ text: "/skill:node-loop <rest>" }`
 - `/exitnode [setup|view|<goal>]` slash command: same routing.
-- Setup: one picker per role in the roles table; choices come from `ctx.models.list()` and keep only ids where `ctx.models.resolve` returns the same id, so every offered id is one `--model` accepts. Author defaults are offered only when they resolve for the user. Shared-provider review and repeated council models produce a warning in the confirm, never a block. Current value preselected; then isolation settings; one summary confirm; writes global settings only after confirm. The settings registry is imported dynamically, and when it or a write method is missing, setup prints the exact config lines instead.
+- Setup: one picker per role in the roles table; choices come from `omp models --json` (the catalog `--model` resolves against), so every offered id is one omp accepts. If that command cannot be read, setup stops and says so. Author defaults are offered only when that catalog lists them for the user. Shared-provider review and repeated council models produce a warning in the confirm, never a block. Current value preselected; then isolation settings; one summary confirm; writes global settings only after confirm. The settings registry is imported dynamically, and when it or a write method is missing, setup prints the exact config lines instead.
 - Forge: `startForge(): Promise<{ url: string }>` exported from `forge/server.ts`; idempotent (second call returns the running URL).
 
 ## Forge view
