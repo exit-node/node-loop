@@ -48,7 +48,7 @@ flowchart LR
   P --> I[implementer per plan node, isolated] --> F{fence check}
   F -- outside fence --> I
   F --> R[reviewer, other model]
-  R -- fail, max 3 rounds --> I
+  R -- fail, max 3 kickbacks --> I
   R -- pass --> M[merge to run branch]
   M --> C[council: 3 seats + chair] --> D[report]
   C -- verified blockers --> I

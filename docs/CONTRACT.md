@@ -187,7 +187,7 @@ One event per line, written only by `scripts/ledger`:
 | council | `start`, `verify`, `done` (verdict=clean\|fix, blockers) |
 | seat-N | `start`, `done` (findings) |
 
-`round` starts at 1. A `fail`/`fence` event is a kickback; the next `implement` carries `round+1`. Cap: round 4 never starts; after round-3 `fail` the orchestrator writes `ruled` or `blocked`.
+`round` starts at 1. A `fail`/`fence` event is a kickback; the next `implement` carries `round+1`. Cap: three kickbacks, so round 5 never starts; after round-4 `fail` the orchestrator writes `ruled` or `blocked`.
 
 A `fence` also covers a leak into REPO found by `check-result`'s leak check; its paths are the leaked ones.
 
@@ -227,8 +227,8 @@ Example:
 5. Before each wave: `pre-dispatch` leaves REPO clean; any dirt is stashed as `node-loop-orchestrator-wave<W>` and recorded as `run dirty`, attributed to the scouts, planner or orchestrator. Per wave: dispatch one `node-implementer` per ready plan node, `isolated: true`, all in one `task` call. Context field: run dir, node path, brief path, report path, dep contract sections, and on round > 1 the previous `.patch` and review paths.
 6. On each result: `scripts/check-result` (blocked results included), which runs `leak-check` first (exit 1: a leak into REPO, stashed as `node-loop-leak-<id>-r<K>` and recorded as `fence`) and then `fence-check` on `branchBaseSha..branchName`; exit 1 on either is an automatic kickback with `FENCE_VIOLATIONS`, no reviewer; exit 2 stops the run for a human; else `review-package` then `node-reviewer` (not isolated, reads package + node + report).
 7. Pass: cherry-pick the branch commits onto `RUN_BRANCH`, append Exposes to `contracts.md`, ledger `merged`. Cherry-pick conflict = kickback on the new base with `CONFLICT_PATHS`.
-8. Fail: new fresh `node-implementer` (never revive the old agent), round+1, max 3 rounds. It gets exactly one findings key: `PREV_VERDICT` (review fail), `FENCE_VIOLATIONS` (fence or leak), `CONFLICT_PATHS` (cherry-pick conflict), or none for an empty diff; plus `PREV_PATCH` when a diff exists. Nits never kick back; they go to `report.md`.
-9. After round 3 fails: each open finding gets a ruling in `rulings.md` (reviewer wrong, or real but nothing depends on it) or the run stops and asks the user (real and a later node depends on it). No silent drops.
+8. Fail: new fresh `node-implementer` (never revive the old agent), round+1, max 3 kickbacks (4 rounds). It gets exactly one findings key: `PREV_VERDICT` (review fail), `FENCE_VIOLATIONS` (fence or leak), `CONFLICT_PATHS` (cherry-pick conflict), or none for an empty diff; plus `PREV_PATCH` when a diff exists. Nits never kick back; they go to `report.md`.
+9. After round 4 fails: each open finding gets a ruling in `rulings.md` (reviewer wrong, or real but nothing depends on it) or the run stops and asks the user (real and a later node depends on it). No silent drops.
 10. All plan nodes merged: `council-chair` (not isolated) reviews `BASE_SHA..RUN_BRANCH`. `verdict: fix` → its fix nodes enter the loop as a new wave; second council run after fixes, then stop.
 11. Write `report.md` (merged nodes, rulings, nits, parking, council result); ledger `run done`.
 

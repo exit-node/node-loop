@@ -114,24 +114,24 @@ When every plan node of the wave is merged or blocked, close the wave phase and 
 
 After a `fail` or `fence` at round K:
 
-- K < 3: run `scripts/ledger "$RUN" <id> implement round=<K+1> agent=Impl<NN>r<K+1>` and dispatch a fresh `node-implementer` exactly as in step 5, one item, with `ROUND=<K+1>`, `PREV_PATCH=$RUN/reviews/<id>-r<K>.patch` and the findings key of the kickback, then continue at step 6:
+- K < 4: run `scripts/ledger "$RUN" <id> implement round=<K+1> agent=Impl<NN>r<K+1>` and dispatch a fresh `node-implementer` exactly as in step 5, one item, with `ROUND=<K+1>`, `PREV_PATCH=$RUN/reviews/<id>-r<K>.patch` and the findings key of the kickback, then continue at step 6:
   - review `fail`: `PREV_VERDICT=$RUN/reviews/<id>-r<K>.json`;
   - `fence` (check-result, leak or fence): `FENCE_VIOLATIONS=<comma-joined paths>`;
   - cherry-pick conflict: `CONFLICT_PATHS=<comma-joined paths>`;
   - empty diff: no findings key and no `PREV_PATCH`; an empty branch after a leak uses `FENCE_VIOLATIONS` instead, with the leaked paths.
-- K = 3: round 4 never starts; go to step 9.
+- K = 4: three kickbacks are spent and round 5 never starts; go to step 9.
 
 Done when the plan node has a new `implement` line or has reached step 9.
 
 ### 9. Rule leftover findings
 
-For a plan node that failed round 3, read each open blocker, major, creep and shrink item against the code and give it one ruling:
+For a plan node that failed round 4, read each open blocker, major, creep and shrink item against the code and give it one ruling:
 
 - **reviewer wrong**: the code shows the claim false;
 - **real, nothing depends on it**: no later plan node's `Consumes:`, fence or acceptance relies on it.
 
-When every item gets one of these rulings, append one line per item to `rulings.md` (`<id> r3 <file:line> <ruling>: <one-line reason>`), run `scripts/ledger "$RUN" <id> ruled round=3 findings=<count>`, then land the round-3 work through step 7 (items 2 to 5) if its fence check was clean.
-When any item is real and a later plan node depends on it, or the round-3 fence check failed, run `scripts/ledger "$RUN" <id> blocked round=3`, stop dispatching its dependants, and ask the user how to proceed.
+When every item gets one of these rulings, append one line per item to `rulings.md` (`<id> r4 <file:line> <ruling>: <one-line reason>`), run `scripts/ledger "$RUN" <id> ruled round=4 findings=<count>`, then land the round-4 work through step 7 (items 2 to 5) if its fence check was clean.
+When any item is real and a later plan node depends on it, or the round-4 fence check failed, run `scripts/ledger "$RUN" <id> blocked round=4`, stop dispatching its dependants, and ask the user how to proceed.
 
 Done when every open item is in `rulings.md` or the user has been asked about it.
 
